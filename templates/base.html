@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="pt" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}EU-PAGOTAMANHÃ{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260528-fresh">
+</head>
+<body>
+<header class="site-shell">
+  <nav class="navbar">
+    <a class="brand" href="{{ url_for('index') }}">
+      <span class="brand-mark">EP</span>
+      <span><strong>EU-PAGOTAMANHÃ</strong><small>Contract workspace</small></span>
+    </a>
+    <button class="nav-toggle" type="button" data-nav-toggle>☰</button>
+    <div class="nav-links" data-nav-links>
+      <a href="{{ url_for('index') }}">Home</a>
+      <a href="{{ url_for('contracts_list') }}">Contracts</a>
+      <a href="{{ url_for('users_list') }}">Users</a>
+      <a href="{{ url_for('verify_manual') }}">Verify</a>
+      {% if current_user %}
+        <a href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a href="{{ url_for('profile', user_id=current_user.id) }}">Profile</a>
+        <a class="btn btn-ghost" href="{{ url_for('logout') }}">Logout</a>
+      {% else %}
+        <a href="{{ url_for('login') }}">Login</a>
+        <a class="btn btn-primary" href="{{ url_for('register') }}">Register</a>
+      {% endif %}
+      <button class="theme-toggle" type="button" data-theme-toggle>☀︎</button>
+    </div>
+  </nav>
+</header>
+
+<main class="page-shell">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <section class="flash-stack">
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </section>
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="footer">
+  <span>EU-PAGOTAMANHÃ</span>
+  <span>Contratos assinados digitalmente · RSA · AES · HMAC</span>
+</footer>
+<script src="{{ url_for('static', filename='js/main.js') }}?v=20260528-fresh"></script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+<article class="contract-card">
+  <div class="contract-card-main">
+    <div class="contract-copy">
+      <div class="card-topline">
+        <span class="status-pill status-{{ contract.estado }}">{{ contract.estado|capitalize }}</span>
+        <span class="muted">#{{ contract.id }}</span>
+      </div>
+      <h3>{{ contract.titulo }}</h3>
+      <p>{{ contract.texto_contrato[:180] }}{% if contract.texto_contrato|length > 180 %}...{% endif %}</p>
+    </div>
+    <div class="contract-meta">
+      <div><span>Proponente</span><strong>{{ contract.proponente_nome }}</strong></div>
+      <div><span>Aceitante</span><strong>{{ contract.aceitante_nome }}</strong></div>
+      <div><span>Assinaturas</span><strong>{{ contract.assinaturas_count }}/2</strong></div>
+    </div>
+    <div class="contract-actions">
+      <a class="btn btn-primary" href="{{ url_for('view_contract', contract_id=contract.id) }}">View details</a>
+      <a class="btn btn-soft" href="{{ url_for('verify_contract', contract_id=contract.id) }}">Verify</a>
+      {% if current_user and current_user.id in [contract.id_proponente, contract.id_aceitante] and contract.estado == 'pendente' %}
+        <a class="btn btn-ghost" href="{{ url_for('sign_contract_view', contract_id=contract.id) }}">Sign</a>
+        <form method="post" action="{{ url_for('reject_contract', contract_id=contract.id) }}"
+              onsubmit="return confirm('Tens a certeza que queres rejeitar este contrato?');">
+          <button class="btn btn-danger" type="submit">Reject</button>
+        </form>
+      {% endif %}
+
+      {% if current_user and current_user.id == contract.id_aceitante and contract.estado == 'assinado' %}
+        <form method="post" action="{{ url_for('settle_contract', contract_id=contract.id) }}"
+              onsubmit="return confirm('Confirmas que este contrato está sanado?');">
+          <button class="btn btn-success" type="submit">Settle</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+</article>
