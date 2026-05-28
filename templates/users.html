@@ -1,6 +1,0 @@
-{% extends "base.html" %}
-{% block title %}Users · EU-PAGOTAMANHÃ{% endblock %}
-{% block content %}
-<section class="page-hero compact"><span class="eyebrow">Public identities</span><h1>Users</h1><p>Public profiles and RSA public keys.</p></section>
-<div class="user-grid">{% for user in users %}<a class="user-card card" href="{{ url_for('profile', user_id=user.id) }}"><span class="avatar">{{ user.nome[:1]|upper }}</span><div><strong>{{ user.nome }}</strong><small>{{ user.email }}</small></div></a>{% else %}<div class="empty-state card">No users yet.</div>{% endfor %}</div>
-{% endblock %}
