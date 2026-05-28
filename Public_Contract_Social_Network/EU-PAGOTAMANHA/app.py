@@ -84,7 +84,7 @@ def register():
         private_pem, public_pem = crypto.generate_rsa_keypair()
         encrypted = crypto.encrypt_private_key(private_pem, password)
         key_data = {"public_key": public_pem, **encrypted}
-        user_id = db.create_user(nome, email, generate_password_hash(password), key_data)
+        user_id = db.create_user(nome, email, generate_password_hash(password, method="scrypt", salt_length=16), key_data)
         session["user_id"] = user_id
         flash("Conta criada. Foi gerado um par de chaves RSA.", "success")
         return redirect(url_for("dashboard"))
@@ -136,8 +136,14 @@ def create_contract():
         password = request.form.get("password", "")
         encrypt_mode = request.form.get("encrypt_mode", "none")
         reveal_at = (request.form.get("reveal_at") or "").replace("T", " ") or None
-        cipher_name = request.form.get("cipher", "AES-256-CBC")
-        hmac_name = request.form.get("hmac_algorithm", "HMAC-SHA256")
+
+        # New combined selector. Backwards compatible with the old cipher + HMAC fields.
+        encryption_profile = request.form.get("encryption_profile", "none")
+        if encryption_profile == "none":
+            legacy_cipher = request.form.get("cipher")
+            legacy_hmac = request.form.get("hmac_algorithm")
+            if encrypt_mode == "timed" and legacy_cipher and legacy_hmac:
+                encryption_profile = f"{legacy_cipher}:{legacy_hmac}"
 
         if not title or not text or not receiver_id or not password:
             flash("Título, texto, aceitante e password são obrigatórios.", "danger")
@@ -172,7 +178,17 @@ def create_contract():
             "proponente_signed_at": created_at,
         }
         if encrypt_mode == "timed":
-            enc = crypto.encrypt_contract_text(text, password, cipher_name, hmac_name)
+            try:
+                selected_combo = crypto.parse_encryption_profile(encryption_profile)
+                if selected_combo is None:
+                    flash("Seleciona uma combinação de cifra e HMAC.", "danger")
+                    return render_template("create_contract.html", users=users, kind=kind)
+                cipher_name, hmac_name = selected_combo
+                enc = crypto.encrypt_contract_text(text, password, cipher_name, hmac_name)
+            except ValueError:
+                flash("Combinação de cifra/HMAC inválida.", "danger")
+                return render_template("create_contract.html", users=users, kind=kind)
+
             data.update(enc)
             data["reveal_at"] = reveal_at or None
         contract_id = db.create_contract(data)
@@ -205,6 +221,11 @@ def sign_contract_view(contract_id: int):
     if session["user_id"] not in (contract["id_proponente"], contract["id_aceitante"]):
         flash("Não fazes parte deste contrato.", "danger")
         return redirect(url_for("view_contract", contract_id=contract_id))
+
+    if contract["estado"] != "pendente":
+        flash("Este contrato já não está pendente e não pode ser assinado.", "warning")
+        return redirect(url_for("view_contract", contract_id=contract_id))
+
     signatures = db.get_contract_signatures(contract_id)
     own = next((s for s in signatures if s["id_utilizador"] == session["user_id"]), None)
     if own and own["assinatura_digital"]:
@@ -270,9 +291,42 @@ def profile(user_id: int):
 @login_required
 def settle_contract(contract_id: int):
     contract = db.get_contract(contract_id)
-    if contract and session["user_id"] in (contract["id_proponente"], contract["id_aceitante"]):
-        db.mark_sanado(contract_id)
-        flash("Contrato marcado como sanado.", "success")
+    if not contract:
+        flash("Contrato não encontrado.", "danger")
+        return redirect(url_for("contracts_list"))
+
+    # Pelo enunciado, quem aceitou o contrato pode marcá-lo como sanado.
+    if session["user_id"] != contract["id_aceitante"]:
+        flash("Só o aceitante pode marcar este contrato como sanado.", "danger")
+        return redirect(url_for("view_contract", contract_id=contract_id))
+
+    if contract["estado"] != "assinado":
+        flash("Só contratos assinados podem ser marcados como sanados.", "warning")
+        return redirect(url_for("view_contract", contract_id=contract_id))
+
+    db.mark_sanado(contract_id)
+    flash("Contrato marcado como sanado.", "success")
+    return redirect(url_for("view_contract", contract_id=contract_id))
+
+
+@app.route("/contracts/<int:contract_id>/reject", methods=["POST"])
+@login_required
+def reject_contract(contract_id: int):
+    contract = db.get_contract(contract_id)
+    if not contract:
+        flash("Contrato não encontrado.", "danger")
+        return redirect(url_for("contracts_list"))
+
+    if session["user_id"] not in (contract["id_proponente"], contract["id_aceitante"]):
+        flash("Não fazes parte deste contrato.", "danger")
+        return redirect(url_for("view_contract", contract_id=contract_id))
+
+    if contract["estado"] != "pendente":
+        flash("Só contratos pendentes podem ser rejeitados.", "warning")
+        return redirect(url_for("view_contract", contract_id=contract_id))
+
+    db.mark_rejeitado(contract_id)
+    flash("Contrato rejeitado.", "success")
     return redirect(url_for("view_contract", contract_id=contract_id))
 
 

@@ -168,3 +168,105 @@ input:focus, textarea:focus, select:focus { border-color: color-mix(in srgb, var
   .footer { flex-direction: column; gap: 8px; }
   .signature-row { align-items: flex-start; flex-direction: column; }
 }
+
+
+/* Encryption profile UI */
+.crypto-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.crypto-option {
+  border: 1px solid var(--border, rgba(148, 163, 184, .22));
+  border-radius: 18px;
+  padding: 16px;
+  background: var(--surface-soft, rgba(255, 255, 255, .55));
+}
+
+.crypto-option strong {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.crypto-option span {
+  display: block;
+  color: var(--muted, #64748b);
+  font-size: .92rem;
+  line-height: 1.45;
+}
+
+.crypto-meta {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.crypto-meta span {
+  display: block;
+  word-break: break-all;
+  border: 1px solid var(--border, rgba(148, 163, 184, .22));
+  border-radius: 14px;
+  padding: 12px;
+  background: var(--surface-soft, rgba(255, 255, 255, .55));
+  color: var(--muted, #64748b);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: .86rem;
+}
+
+.crypto-meta strong {
+  display: block;
+  color: var(--text, #0f172a);
+  font-family: inherit;
+  margin-bottom: 4px;
+}
+
+.small {
+  font-size: .9rem;
+}
+
+@media (max-width: 780px) {
+  .crypto-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* Reject / settle actions */
+.btn-danger {
+  background: color-mix(in srgb, var(--danger, #b91c1c) 12%, var(--surface, #fff));
+  color: var(--danger, #b91c1c);
+  border: 1px solid color-mix(in srgb, var(--danger, #b91c1c) 24%, var(--border, #e2e8f0));
+}
+
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--danger, #b91c1c) 18%, var(--surface, #fff));
+  transform: translateY(-1px);
+}
+
+.btn-success {
+  background: color-mix(in srgb, var(--success, #15803d) 12%, var(--surface, #fff));
+  color: var(--success, #15803d);
+  border: 1px solid color-mix(in srgb, var(--success, #15803d) 24%, var(--border, #e2e8f0));
+}
+
+.btn-success:hover {
+  background: color-mix(in srgb, var(--success, #15803d) 18%, var(--surface, #fff));
+  transform: translateY(-1px);
+}
+
+.contract-actions form,
+.button-stack form {
+  margin: 0;
+}
+
+.status-sanado {
+  color: var(--success, #15803d);
+  background: color-mix(in srgb, var(--success, #15803d) 12%, var(--surface, #fff));
+}
+
+.status-rejeitado {
+  color: var(--danger, #b91c1c);
+  background: color-mix(in srgb, var(--danger, #b91c1c) 12%, var(--surface, #fff));
+}

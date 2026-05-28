@@ -26,7 +26,7 @@ def clear():
 def create_user(nome, email):
     private_pem, public_pem = crypto.generate_rsa_keypair()
     encrypted = crypto.encrypt_private_key(private_pem, PASSWORD)
-    return db.create_user(nome, email, generate_password_hash(PASSWORD), {"public_key": public_pem, **encrypted})
+    return db.create_user(nome, email, generate_password_hash(PASSWORD, method="scrypt", salt_length=16), {"public_key": public_pem, **encrypted})
 
 
 def sign_as(contract, user_id):

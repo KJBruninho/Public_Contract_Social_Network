@@ -18,6 +18,17 @@
       <a class="btn btn-soft" href="{{ url_for('verify_contract', contract_id=contract.id) }}">Verify</a>
       {% if current_user and current_user.id in [contract.id_proponente, contract.id_aceitante] and contract.estado == 'pendente' %}
         <a class="btn btn-ghost" href="{{ url_for('sign_contract_view', contract_id=contract.id) }}">Sign</a>
+        <form method="post" action="{{ url_for('reject_contract', contract_id=contract.id) }}"
+              onsubmit="return confirm('Tens a certeza que queres rejeitar este contrato?');">
+          <button class="btn btn-danger" type="submit">Reject</button>
+        </form>
+      {% endif %}
+
+      {% if current_user and current_user.id == contract.id_aceitante and contract.estado == 'assinado' %}
+        <form method="post" action="{{ url_for('settle_contract', contract_id=contract.id) }}"
+              onsubmit="return confirm('Confirmas que este contrato está sanado?');">
+          <button class="btn btn-success" type="submit">Settle</button>
+        </form>
       {% endif %}
     </div>
   </div>

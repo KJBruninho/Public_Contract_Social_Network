@@ -311,3 +311,8 @@ def mark_sanado(contract_id: int) -> None:
 def seed_basic() -> None:
     # Used by scripts/reset_and_seed.py; kept here for convenience.
     pass
+
+
+def mark_rejeitado(contract_id: int) -> None:
+    with get_db() as conn:
+        conn.cursor().execute("UPDATE contratos SET estado='rejeitado' WHERE id=%s AND estado='pendente'", (contract_id,))
