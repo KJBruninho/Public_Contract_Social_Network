@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Manual verification · EU-PAGOTAMANHÃ{% endblock %}
+{% block content %}
+<section class="page-hero compact"><span class="eyebrow">Manual tool</span><h1>Verify external signature</h1><p>Paste payload, signature and public key.</p></section>
+<form class="form-card wide card" method="post"><label>Payload<textarea name="payload" rows="5"></textarea></label><label>Signature Base64<textarea name="signature" rows="4"></textarea></label><label>Public key PEM<textarea name="public_key" rows="8"></textarea></label><button class="btn btn-primary" type="submit">Verify</button>{% if result is not none %}<div class="info-box"><strong>Result:</strong> {{ 'Valid' if result else 'Invalid' }}</div>{% endif %}</form>
+{% endblock %}

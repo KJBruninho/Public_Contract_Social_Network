@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Verify · EU-PAGOTAMANHÃ{% endblock %}
+{% block content %}
+<section class="page-hero compact"><span class="eyebrow">Verification</span><h1>Contract #{{ contract.id }}</h1><p>Verification uses the public key of each signer and the exact contract payload.</p></section>
+<section class="card"><div class="signature-list">{% for sig in signatures %}<div class="signature-row"><div><strong>{{ sig.nome }}</strong><span>{{ sig.email }} · {{ sig.tipo_assinante }}</span></div><span class="status-pill {% if sig.valid %}status-assinado{% else %}status-rejeitado{% endif %}">{% if sig.assinatura_digital %}{{ 'Valid signature' if sig.valid else 'Invalid signature' }}{% else %}No signature{% endif %}</span></div>{% endfor %}</div></section>
+{% endblock %}

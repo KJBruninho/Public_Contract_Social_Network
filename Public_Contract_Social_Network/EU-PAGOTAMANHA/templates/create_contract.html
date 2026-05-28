@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Create contract · EU-PAGOTAMANHÃ{% endblock %}
+{% block content %}
+<section class="page-hero compact"><span class="eyebrow">New contract</span><h1>Create a contract</h1><p>Write the contract text and sign it with your encrypted RSA private key.</p></section>
+<form class="form-card wide card" method="post">
+  <div class="form-grid two">
+    <label>Title<input name="titulo" required placeholder="Devo-te 10 euros"></label>
+    <label>Receiver<select name="id_aceitante" required><option value="">Choose user</option>{% for user in users %}<option value="{{ user.id }}">{{ user.nome }} · {{ user.email }}</option>{% endfor %}</select></label>
+  </div>
+  <label>Contract text<textarea name="texto_contrato" rows="7" required placeholder="Devo-te 10 euros mas juro que te pago amanhã!"></textarea></label>
+  <div class="form-grid two">
+    <label>Visibility<select name="visibilidade"><option value="publico">Public</option><option value="privado">Private</option></select></label>
+    <label>Your password<input type="password" name="password" required placeholder="Used to decrypt your private key"></label>
+  </div>
+  <div class="info-box"><label class="check"><input type="checkbox" name="encrypt_mode" value="timed" data-encryption-toggle> Temporarily encrypt public text</label></div>
+  <div class="encryption-panel" data-encryption-panel hidden>
+    <div class="form-grid three">
+      <label>Reveal at<input type="datetime-local" name="reveal_at"></label>
+      <label>Cipher<select name="cipher"><option>AES-256-CBC</option><option>AES-256-CTR</option></select></label>
+      <label>HMAC<select name="hmac_algorithm"><option>HMAC-SHA256</option><option>HMAC-SHA512</option></select></label>
+    </div>
+  </div>
+  <div class="form-actions"><a class="btn btn-ghost" href="{{ url_for('dashboard') }}">Cancel</a><button class="btn btn-primary" type="submit">Create and sign</button></div>
+</form>
+{% endblock %}

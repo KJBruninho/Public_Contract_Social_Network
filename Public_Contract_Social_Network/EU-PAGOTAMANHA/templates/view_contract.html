@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Contract #{{ contract.id }} · EU-PAGOTAMANHÃ{% endblock %}
+{% block content %}
+<section class="detail-layout">
+  <article class="card detail-card">
+    <div class="card-topline"><span class="status-pill status-{{ contract.estado }}">{{ contract.estado|capitalize }}</span><span class="muted">#{{ contract.id }}</span></div>
+    <h1>{{ contract.titulo }}</h1>
+    <div class="contract-text">{{ contract.texto_contrato }}</div>
+    {% if contract.encrypted_text %}<div class="code-box"><strong>Visible ciphertext</strong><code>{{ contract.encrypted_text }}</code></div>{% endif %}
+  </article>
+  <aside class="card side-panel">
+    <h3>Parties</h3>
+    <p><span>Proponente</span><strong>{{ contract.proponente_nome }}</strong></p>
+    <p><span>Aceitante</span><strong>{{ contract.aceitante_nome }}</strong></p>
+    <p><span>Date</span><strong>{{ contract.data_criacao }}</strong></p>
+    <div class="button-stack">
+      <a class="btn btn-primary" href="{{ url_for('verify_contract', contract_id=contract.id) }}">Verify signatures</a>
+      <a class="btn btn-soft" href="{{ url_for('export_contract', contract_id=contract.id) }}">Export CSV</a>
+      {% if current_user and current_user.id in [contract.id_proponente, contract.id_aceitante] and contract.estado == 'pendente' %}<a class="btn btn-ghost" href="{{ url_for('sign_contract_view', contract_id=contract.id) }}">Sign contract</a>{% endif %}
+      {% if current_user and current_user.id == contract.id_aceitante and contract.estado == 'assinado' %}<form method="post" action="{{ url_for('settle_contract', contract_id=contract.id) }}"><button class="btn btn-ghost full" type="submit">Mark as settled</button></form>{% endif %}
+    </div>
+  </aside>
+</section>
+<section class="card"><h2>Signatures</h2><div class="signature-list">{% for sig in signatures %}<div class="signature-row"><div><strong>{{ sig.nome }}</strong><span>{{ sig.tipo_assinante }}</span></div><span class="status-pill {% if sig.valid %}status-assinado{% else %}status-pendente{% endif %}">{% if sig.assinatura_digital %}{{ 'Valid' if sig.valid else 'Invalid' }}{% else %}Pending{% endif %}</span></div>{% endfor %}</div></section>
+{% endblock %}
