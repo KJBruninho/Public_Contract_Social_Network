@@ -80,7 +80,7 @@ EU-PAGOTAMANHA/
 ├── database.py
 ├── crypto_utils.py
 ├── requirements.txt
-├── .env.example
+├── env.example
 ├── test_db_connection.py
 │
 ├── scripts/
@@ -183,13 +183,13 @@ Copia o ficheiro de exemplo:
 No Windows:
 
 ```powershell
-copy .env.example .env
+copy env.example .env
 ```
 
 No Linux/macOS:
 
 ```bash
-cp .env.example .env
+cp env.example .env
 ```
 
 Edita o ficheiro `.env`:
