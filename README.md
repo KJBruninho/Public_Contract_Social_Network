@@ -84,6 +84,9 @@ EU-PAGOTAMANHA/
 ├── test_db_connection.py
 │
 ├── scripts/
+│   ├── BD_sql_Querys
+    │   └── init.sql
+    │   └── populate.sql
 │   └── reset_and_seed.py
 │
 ├── templates/
