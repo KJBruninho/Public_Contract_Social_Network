@@ -85,8 +85,8 @@ EU-PAGOTAMANHA/
 │
 ├── scripts/
 │   ├── BD_sql_Querys
-    │   └── init.sql
-    │   └── populate.sql
+|   │   └── init.sql
+|   │   └── populate.sql
 │   └── reset_and_seed.py
 │
 ├── templates/
