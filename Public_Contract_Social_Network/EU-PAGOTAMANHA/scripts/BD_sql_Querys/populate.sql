@@ -14,6 +14,7 @@ ALTER TABLE chaves_utilizador AUTO_INCREMENT = 1;
 ALTER TABLE utilizadores AUTO_INCREMENT = 1;
 SET FOREIGN_KEY_CHECKS = 1;
 SET SQL_SAFE_UPDATES = 1;
+
 INSERT INTO utilizadores (id, nome, email, password_hash, data_registo, mfa_enabled, mfa_secret, password_changed_at, must_change_password) VALUES
 (1, 'Ana Silva', 'ana@example.com', 'scrypt:32768:8:1$demo$aaf22a293da85016c58e09b9df0267bcd56b5858877e202b0c60ce40e436e0587674263968da2c7acfa7a589532f8d5d8065449c11d1a8dc3de54a119afdd68f', '2026-01-02 09:00:00', FALSE, NULL, '2026-01-02 09:00:00', FALSE),
 (2, 'Bruno Costa', 'bruno@example.com', 'scrypt:32768:8:1$demo$aaf22a293da85016c58e09b9df0267bcd56b5858877e202b0c60ce40e436e0587674263968da2c7acfa7a589532f8d5d8065449c11d1a8dc3de54a119afdd68f', '2026-01-03 09:00:00', FALSE, NULL, '2026-01-03 09:00:00', FALSE),
