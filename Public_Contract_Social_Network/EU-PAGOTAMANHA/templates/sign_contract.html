@@ -2,7 +2,26 @@
 {% block title %}Sign contract · EU-PAGOTAMANHÃ{% endblock %}
 {% block content %}
 <section class="auth-layout narrow">
-  <div class="auth-copy card"><span class="eyebrow">Digital signature</span><h1>Sign contract #{{ contract.id }}</h1><p>Your password decrypts your RSA private key locally in the application process and signs the canonical contract payload.</p></div>
-  <form class="form-card card" method="post"><h2>Confirm signature</h2><label>Password<input type="password" name="password" required></label><button class="btn btn-primary full" type="submit">Sign digitally</button></form>
+  <div class="auth-copy card">
+    <span class="eyebrow">Digital signature</span>
+    <h1>Sign contract #{{ contract.id }}</h1>
+    <p>Your password decrypts your RSA private key locally in the application process and signs the canonical contract payload.</p>
+
+    <h3>Contract text to sign</h3>
+    <div class="contract-text">{{ contract.texto_contrato }}</div>
+
+    {% if contract.encrypted_text %}
+      <div class="info-box">
+        <strong>Public text is encrypted until {{ contract.reveal_at }}</strong>
+        <span>The plaintext is shown here because you are one of the parties and must read the exact text before signing.</span>
+      </div>
+    {% endif %}
+  </div>
+
+  <form class="form-card card" method="post">
+    <h2>Confirm signature</h2>
+    <label>Password<input type="password" name="password" required></label>
+    <button class="btn btn-primary full" type="submit">Sign digitally</button>
+  </form>
 </section>
 {% endblock %}

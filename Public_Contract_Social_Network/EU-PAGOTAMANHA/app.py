@@ -50,15 +50,79 @@ def login_required(fn):
     return wrapper
 
 
+def _current_user_id() -> int | None:
+    """Returns the authenticated user id, if any."""
+    user_id = session.get("user_id")
+    return int(user_id) if user_id else None
+
+
+def _is_contract_party(contract: dict, user_id: int | None) -> bool:
+    return bool(user_id and user_id in (contract.get("id_proponente"), contract.get("id_aceitante")))
+
+
+def can_view_contract(contract: dict) -> bool:
+    """Visibility rule used by detail, verification and export routes.
+
+    Public contracts only become public after both signatures exist and the
+    contract is marked as signed/sanado. Private, pending and rejected contracts
+    are visible only to their two parties.
+    """
+    viewer_id = _current_user_id()
+    is_public_published = contract.get("visibilidade") == "publico" and contract.get("estado") in ("assinado", "sanado")
+    return is_public_published or _is_contract_party(contract, viewer_id)
+
+
+def deny_if_cannot_view(contract: dict):
+    if can_view_contract(contract):
+        return None
+    flash("Não tens permissão para ver este contrato.", "danger")
+    return redirect(url_for("contracts_list"))
+
+
+def _parse_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M"):
+        try:
+            return datetime.strptime(str(value), fmt)
+        except ValueError:
+            pass
+    return None
+
+
+def can_reveal_plaintext(contract: dict) -> bool:
+    """Returns True when a contract's clear text may be displayed/exported."""
+    if not contract.get("encrypted_text"):
+        return True
+    reveal_at = _parse_datetime(contract.get("reveal_at"))
+    return bool(reveal_at and datetime.now() >= reveal_at)
+
+
+def contract_for_display(contract: dict) -> dict:
+    """Prevents list/profile cards from leaking hidden encrypted text."""
+    visible = dict(contract)
+    if not can_reveal_plaintext(contract):
+        reveal_at = contract.get("reveal_at") or "data não definida"
+        visible["texto_contrato"] = f"[Texto cifrado até {reveal_at}]"
+    return visible
+
+
+def contracts_for_display(contracts: list[dict]) -> list[dict]:
+    return [contract_for_display(contract) for contract in contracts]
+
+
 @app.route("/")
 def index():
-    contracts = db.get_public_contracts()
+    contracts = contracts_for_display(db.get_public_contracts())
     return render_template("index.html", contracts=contracts)
 
 
 @app.route("/contracts")
 def contracts_list():
-    return render_template("contracts.html", contracts=db.get_all_contracts())
+    contracts = contracts_for_display(db.get_visible_contracts(_current_user_id()))
+    return render_template("contracts.html", contracts=contracts)
 
 
 @app.route("/register", methods=["GET", "POST"])
@@ -117,9 +181,10 @@ def logout():
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    contracts = db.get_user_contracts(session["user_id"])
-    pending = [c for c in contracts if c["estado"] == "pendente"]
-    signed = [c for c in contracts if c["estado"] in ("assinado", "sanado")]
+    raw_contracts = db.get_user_contracts(session["user_id"])
+    pending = [c for c in raw_contracts if c["estado"] == "pendente"]
+    signed = [c for c in raw_contracts if c["estado"] in ("assinado", "sanado")]
+    contracts = contracts_for_display(raw_contracts)
     return render_template("dashboard.html", contracts=contracts, pending=pending, signed=signed)
 
 
@@ -203,6 +268,9 @@ def view_contract(contract_id: int):
     if not contract:
         flash("Contrato não encontrado.", "danger")
         return redirect(url_for("contracts_list"))
+    denied = deny_if_cannot_view(contract)
+    if denied:
+        return denied
     signatures = db.get_contract_signatures(contract_id)
     verification = []
     for sig in signatures:
@@ -254,6 +322,9 @@ def verify_contract(contract_id: int):
     if not contract:
         flash("Contrato não encontrado.", "danger")
         return redirect(url_for("contracts_list"))
+    denied = deny_if_cannot_view(contract)
+    if denied:
+        return denied
     rows = []
     for sig in db.get_contract_signatures(contract_id):
         rows.append({**sig, "valid": crypto.verify_signature(sig["public_key"], crypto.canonical_contract_payload(contract), sig["assinatura_digital"])})
@@ -283,7 +354,7 @@ def profile(user_id: int):
     if not user:
         flash("Utilizador não encontrado.", "danger")
         return redirect(url_for("users_list"))
-    contracts = db.get_user_contracts(user_id)
+    contracts = contracts_for_display(db.get_visible_user_contracts(user_id, _current_user_id()))
     return render_template("profile.html", user=user, keys=keys, contracts=contracts)
 
 
@@ -336,11 +407,20 @@ def export_contract(contract_id: int):
     if not contract:
         flash("Contrato não encontrado.", "danger")
         return redirect(url_for("contracts_list"))
+    denied = deny_if_cannot_view(contract)
+    if denied:
+        return denied
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["campo", "valor"])
-    for key in ["id", "titulo", "texto_contrato", "id_proponente", "id_aceitante", "estado", "data_criacao"]:
-        writer.writerow([key, contract.get(key)])
+    export_contract_data = dict(contract)
+    if not can_reveal_plaintext(contract):
+        export_contract_data["texto_contrato"] = "[TEXTO CIFRADO — disponível apenas depois de reveal_at]"
+    for key in [
+        "id", "titulo", "texto_contrato", "id_proponente", "id_aceitante", "estado", "visibilidade", "data_criacao",
+        "encrypted_text", "encryption_algorithm", "encryption_salt", "encryption_iv", "hmac_algorithm", "hmac_value", "reveal_at",
+    ]:
+        writer.writerow([key, export_contract_data.get(key)])
     writer.writerow([])
     writer.writerow(["assinante", "tipo", "assinatura", "public_key"])
     for s in db.get_contract_signatures(contract_id):

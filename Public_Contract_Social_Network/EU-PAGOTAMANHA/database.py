@@ -256,7 +256,51 @@ def get_public_contracts() -> list[dict]:
     return _contract_select("WHERE c.visibilidade='publico' AND c.estado IN ('assinado','sanado')")
 
 
+def get_visible_contracts(viewer_id: int | None = None) -> list[dict]:
+    """Contracts visible in the public ledger for the current viewer.
+
+    Anonymous users see only public contracts that are already signed or settled.
+    Authenticated users also see contracts where they are one of the two parties,
+    including private, pending and rejected contracts.
+    """
+    if not viewer_id:
+        return get_public_contracts()
+    return _contract_select(
+        """
+        WHERE (c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
+           OR c.id_proponente=%s
+           OR c.id_aceitante=%s
+        """,
+        (viewer_id, viewer_id),
+    )
+
+
+def get_visible_user_contracts(profile_user_id: int, viewer_id: int | None = None) -> list[dict]:
+    """Contracts shown on a public user profile for the current viewer."""
+    if not viewer_id:
+        return _contract_select(
+            """
+            WHERE (c.id_proponente=%s OR c.id_aceitante=%s)
+              AND c.visibilidade='publico'
+              AND c.estado IN ('assinado','sanado')
+            """,
+            (profile_user_id, profile_user_id),
+        )
+    return _contract_select(
+        """
+        WHERE (c.id_proponente=%s OR c.id_aceitante=%s)
+          AND (
+              (c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
+              OR c.id_proponente=%s
+              OR c.id_aceitante=%s
+          )
+        """,
+        (profile_user_id, profile_user_id, viewer_id, viewer_id),
+    )
+
+
 def get_all_contracts() -> list[dict]:
+    # Kept for admin/debug scripts. Do not use directly in public routes.
     return _contract_select()
 
 

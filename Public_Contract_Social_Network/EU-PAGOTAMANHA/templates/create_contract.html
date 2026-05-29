@@ -70,7 +70,7 @@
 
       <label>
         Reveal at
-        <input type="datetime-local" name="reveal_at">
+        <input type="datetime-local" name="reveal_at" data-reveal-at>
       </label>
     </div>
 
@@ -84,8 +84,8 @@
         <span>Stream-like counter mode. Integrity is provided by HMAC.</span>
       </div>
       <div class="crypto-option">
-        <strong>Salt + IV</strong>
-        <span>Every encryption generates a fresh salt and IV.</span>
+        <strong>Reveal date</strong>
+        <span>Until this date, public pages and CSV export expose only the ciphertext, salt, IV and HMAC.</span>
       </div>
     </div>
   </div>

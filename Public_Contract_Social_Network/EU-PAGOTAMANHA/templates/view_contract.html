@@ -12,14 +12,27 @@
 
     {% if contract.encrypted_text %}
       <div class="info-box">
-        <strong>Encrypted public text</strong>
+        <strong>{% if plaintext_revealed %}Encrypted period ended{% else %}Encrypted public text{% endif %}</strong>
         <p class="muted">
-          This contract has an encrypted public representation.
           Algorithm: <strong>{{ contract.encryption_algorithm }}</strong>.
           HMAC: <strong>{{ contract.hmac_algorithm }}</strong>.
           {% if contract.reveal_at %}Reveal at: <strong>{{ contract.reveal_at }}</strong>.{% endif %}
         </p>
       </div>
+
+      {% if plaintext_revealed %}
+        <h3>Revealed contract text</h3>
+        <div class="contract-text">{{ contract.texto_contrato }}</div>
+      {% elif private_plaintext %}
+        <div class="info-box private-plaintext-box">
+          <strong>Private preview for contract parties</strong>
+          <p class="muted small">The public ledger still shows only the ciphertext until the reveal date. This plaintext preview is shown only because you are one of the parties.</p>
+        </div>
+        <div class="contract-text">{{ private_plaintext }}</div>
+      {% else %}
+        <div class="contract-text muted">{{ contract.texto_contrato }}</div>
+      {% endif %}
+
       <div class="code-box">
         <strong>Visible ciphertext</strong>
         <code>{{ contract.encrypted_text }}</code>
@@ -39,6 +52,9 @@
     <p><span>Proponente</span><strong>{{ contract.proponente_nome }}</strong></p>
     <p><span>Aceitante</span><strong>{{ contract.aceitante_nome }}</strong></p>
     <p><span>Date</span><strong>{{ contract.data_criacao }}</strong></p>
+    {% if contract.encrypted_text %}
+      <p><span>Public text</span><strong>{{ 'Revealed' if plaintext_revealed else 'Encrypted' }}</strong></p>
+    {% endif %}
 
     <div class="button-stack">
       <a class="btn btn-primary" href="{{ url_for('verify_contract', contract_id=contract.id) }}">Verify signatures</a>
@@ -62,7 +78,7 @@
   </aside>
 </section>
 
-<section class="card">
+<section class="card detail-card">
   <h2>Signatures</h2>
   <div class="signature-list">
     {% for sig in signatures %}

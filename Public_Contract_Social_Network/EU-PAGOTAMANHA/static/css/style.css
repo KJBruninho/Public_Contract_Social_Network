@@ -53,9 +53,23 @@ button, input, textarea, select { font: inherit; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: max-content; }
 .brand-mark { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 15px; background: linear-gradient(135deg, var(--primary), var(--primary-2)); color: white; font-weight: 900; }
 .brand small { display: block; color: var(--muted); font-size: 12px; margin-top: 1px; }
-.nav-links { display: flex; align-items: center; gap: 7px; }
-.nav-links > a, .theme-toggle, .nav-toggle { padding: 10px 13px; border-radius: 999px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
-.nav-links > a:hover, .theme-toggle:hover { background: var(--surface-2); color: var(--text); }
+
+/* FIX: Aplica flexbox, padding e cantos redondos a todos os tipos de nav-link globalmente */
+.nav-link, .nav-links > a, .theme-toggle, .nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 13px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.nav-links > a:hover, .theme-toggle:hover, .nav-actions > a:not(.nav-link-logout):not(.nav-link-cta):hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
 .nav-toggle { display: none; }
 .page-shell { max-width: var(--max); margin: 28px auto 0; padding: 0 22px 50px; }
 .footer { max-width: var(--max); margin: 20px auto 35px; padding: 0 22px; display: flex; justify-content: space-between; color: var(--muted); font-size: 14px; }
@@ -233,40 +247,178 @@ input:focus, textarea:focus, select:focus { border-color: color-mix(in srgb, var
 }
 
 
-/* Reject / settle actions */
-.btn-danger {
-  background: color-mix(in srgb, var(--danger, #b91c1c) 12%, var(--surface, #fff));
-  color: var(--danger, #b91c1c);
-  border: 1px solid color-mix(in srgb, var(--danger, #b91c1c) 24%, var(--border, #e2e8f0));
+.theme-switch,
+[data-theme-toggle].theme-switch {
+  min-width: auto;
+  height: 42px;
+  padding: 0.35rem 0.75rem 0.35rem 0.45rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #101a2e;
+  color: #eaf1ff;
+  box-shadow: none;
 }
 
-.btn-danger:hover {
-  background: color-mix(in srgb, var(--danger, #b91c1c) 18%, var(--surface, #fff));
-  transform: translateY(-1px);
+:root[data-theme="light"] .theme-switch {
+  background: #ffffff;
+  color: #1e293b;
+  border-color: #d8e1ec;
 }
 
-.btn-success {
-  background: color-mix(in srgb, var(--success, #15803d) 12%, var(--surface, #fff));
-  color: var(--success, #15803d);
-  border: 1px solid color-mix(in srgb, var(--success, #15803d) 24%, var(--border, #e2e8f0));
+.theme-switch-track {
+  width: 40px;
+  height: 22px;
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #1d2b45;
+  border: 1px solid #2b3c5a;
 }
 
-.btn-success:hover {
-  background: color-mix(in srgb, var(--success, #15803d) 18%, var(--surface, #fff));
-  transform: translateY(-1px);
+:root[data-theme="light"] .theme-switch-track {
+  background: #eef3f9;
+  border-color: #d8e1ec;
 }
 
-.contract-actions form,
-.button-stack form {
-  margin: 0;
+.theme-switch-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #5eead4;
+  box-shadow: 0 0 14px rgba(94, 234, 212, 0.75);
+  transform: translateX(16px);
+  transition: transform 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
 }
 
-.status-sanado {
-  color: var(--success, #15803d);
-  background: color-mix(in srgb, var(--success, #15803d) 12%, var(--surface, #fff));
+:root[data-theme="light"] .theme-switch-thumb {
+  background: #1f3a93;
+  box-shadow: 0 0 10px rgba(31, 58, 147, 0.35);
+  transform: translateX(0);
 }
 
-.status-rejeitado {
-  color: var(--danger, #b91c1c);
-  background: color-mix(in srgb, var(--danger, #b91c1c) 12%, var(--surface, #fff));
+.theme-switch-label {
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+/* Navbar final layout: opaque bar, left links + right actions */
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  padding: 13px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  backdrop-filter: none;
+  box-shadow: var(--shadow-soft);
+}
+
+.navbar .nav-links,
+.nav-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nav-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Active page button: same selected tone as the theme switch */
+.nav-link.active,
+.nav-links > a.active,
+.nav-actions > a.active {
+  color: #5eead4 !important;
+  background: rgba(94, 234, 212, 0.12);
+  border: 1px solid rgba(94, 234, 212, 0.35);
+  box-shadow: 0 0 14px rgba(94, 234, 212, 0.28);
+  font-weight: 900;
+}
+
+:root[data-theme="light"] .nav-link.active,
+:root[data-theme="light"] .nav-links > a.active,
+:root[data-theme="light"] .nav-actions > a.active {
+  color: #1f3a93 !important;
+  background: rgba(31, 58, 147, 0.10);
+  border: 1px solid rgba(31, 58, 147, 0.25);
+  box-shadow: 0 0 10px rgba(31, 58, 147, 0.18);
+}
+
+.nav-link.active:hover,
+.nav-links > a.active:hover,
+.nav-actions > a.active:hover {
+  color: #5eead4 !important;
+  background: rgba(94, 234, 212, 0.16);
+}
+
+:root[data-theme="light"] .nav-link.active:hover,
+:root[data-theme="light"] .nav-links > a.active:hover,
+:root[data-theme="light"] .nav-actions > a.active:hover {
+  color: #1f3a93 !important;
+  background: rgba(31, 58, 147, 0.14);
+}
+
+/* Logout: right aligned and visually destructive */
+.nav-link-logout {
+  color: #fecaca !important;
+  background: rgba(185, 28, 28, 0.14);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  font-weight: 900;
+}
+
+.nav-link-logout:hover {
+  color: #ffffff !important;
+  background: #b91c1c !important;
+  border-color: #ef4444;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.28);
+}
+
+:root[data-theme="light"] .nav-link-logout {
+  color: #991b1b !important;
+  background: rgba(185, 28, 28, 0.08);
+  border: 1px solid rgba(185, 28, 28, 0.22);
+}
+
+:root[data-theme="light"] .nav-link-logout:hover {
+  color: #ffffff !important;
+  background: #b91c1c !important;
+  border-color: #b91c1c;
+}
+
+html:not(.theme-ready) .theme-switch-thumb {
+  transition: none;
+}
+
+@media (max-width: 720px) {
+  .navbar {
+    border-radius: 24px;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .navbar .nav-links,
+  .nav-actions {
+    display: flex;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .nav-actions {
+    margin-left: 0;
+  }
+
+  .navbar .nav-link,
+  .navbar .theme-switch {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
 }

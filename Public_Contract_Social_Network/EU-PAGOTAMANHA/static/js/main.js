@@ -1,19 +1,28 @@
 (function () {
   const root = document.documentElement;
-  const saved = localStorage.getItem('theme') || 'light';
-  root.dataset.theme = saved;
 
-  const btn = document.querySelector('[data-theme-toggle]');
-  function sync() {
-    if (btn) btn.textContent = root.dataset.theme === 'dark' ? '☾' : '☀︎';
+  if (!root.dataset.theme) {
+    const savedTheme = localStorage.getItem("theme");
+    root.dataset.theme = savedTheme === "dark" ? "dark" : "light";
   }
-  sync();
+
+  const btn = document.querySelector("[data-theme-toggle]");
+  const label = document.querySelector("[data-theme-label]");
+
+  function syncThemeButton() {
+    if (label) {
+      label.textContent = root.dataset.theme === "dark" ? "Dark" : "Light";
+    }
+  }
+
+  syncThemeButton();
+  root.classList.add("theme-ready");
 
   if (btn) {
-    btn.addEventListener('click', () => {
-      root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('theme', root.dataset.theme);
-      sync();
+    btn.addEventListener("click", () => {
+      root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+      localStorage.setItem("theme", root.dataset.theme);
+      syncThemeButton();
     });
   }
 
