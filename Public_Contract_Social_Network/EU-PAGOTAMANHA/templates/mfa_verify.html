@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}MFA verification · EU-PAGOTAMANHÃ{% endblock %}
+{% block content %}
+<section class="auth-layout narrow">
+  <div class="auth-copy card">
+    <span class="eyebrow">Second factor</span>
+    <h1>Enter your MFA code.</h1>
+    <p>Use the 6-digit temporary code from your authenticator app to complete login.</p>
+  </div>
+
+  <form class="form-card card" method="post">
+    <h2>MFA verification</h2>
+    <label>6-digit code<input name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autofocus required placeholder="123456"></label>
+    <button class="btn btn-primary full" type="submit">Verify and sign in</button>
+    <p class="muted center"><a href="{{ url_for('logout') }}">Cancel login</a></p>
+  </form>
+</section>
+{% endblock %}

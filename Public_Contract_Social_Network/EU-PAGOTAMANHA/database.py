@@ -360,3 +360,15 @@ def seed_basic() -> None:
 def mark_rejeitado(contract_id: int) -> None:
     with get_db() as conn:
         conn.cursor().execute("UPDATE contratos SET estado='rejeitado' WHERE id=%s AND estado='pendente'", (contract_id,))
+
+def set_mfa(user_id: int, enabled: bool, secret: str | None = None) -> None:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE utilizadores
+            SET mfa_enabled=%s, mfa_secret=%s
+            WHERE id=%s
+            """,
+            (enabled, secret, user_id),
+        )

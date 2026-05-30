@@ -19,6 +19,7 @@
     <a class="action-card" href="{{ url_for('create_contract', type='loan') }}"><span></span><strong>Loan contract</strong><small>Money owed between users</small></a>
     <a class="action-card" href="{{ url_for('create_contract', type='payment') }}"><span></span><strong>Payment agreement</strong><small>Commitment and settlement</small></a>
     <a class="action-card" href="{{ url_for('create_contract', type='draft') }}"><span></span><strong>Draft from file</strong><small>Paste or import text</small></a>
+    <a class="action-card" href="{{ url_for('mfa_setup') }}"><span></span><strong>MFA security</strong><small>{% if current_user and current_user.mfa_enabled %}Enabled{% else %}Enable two-factor login{% endif %}</small></a>
   </div>
 </section>
 
