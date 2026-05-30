@@ -1,64 +1,75 @@
 <!doctype html>
-<html lang="pt" data-theme="light">
+<html lang="pt">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}EU-PAGOTAMANHÃ{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260528-fresh">
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem("theme");
+      document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light";
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260529-navactions-pill2">
 </head>
 <body>
 <header class="site-shell">
-<nav class="nav-links">
-  <a class="nav-link {% if request.endpoint in ['index', 'home'] %}active{% endif %}"
-     href="{{ url_for('index') }}">
-    Home
-  </a>
+  <nav class="navbar">
+    <div class="nav-links" data-nav-links>
+      <a class="nav-link {% if request.endpoint in ['index', 'home'] %}active{% endif %}"
+         href="{{ url_for('index') }}">
+        Home
+      </a>
 
-  <a class="nav-link {% if request.endpoint in ['contracts_list', 'view_contract', 'create_contract', 'sign_contract_view'] %}active{% endif %}"
-     href="{{ url_for('contracts_list') }}">
-    Contracts
-  </a>
+      <a class="nav-link {% if request.endpoint in ['contracts_list', 'view_contract', 'create_contract', 'sign_contract_view'] %}active{% endif %}"
+         href="{{ url_for('contracts_list') }}">
+        Contracts
+      </a>
 
-  <a class="nav-link {% if request.endpoint in ['users_list', 'profile'] %}active{% endif %}"
-     href="{{ url_for('users_list') }}">
-    Users
-  </a>
+      <a class="nav-link {% if request.endpoint in ['users_list', 'profile'] %}active{% endif %}"
+         href="{{ url_for('users_list') }}">
+        Users
+      </a>
 
-  <a class="nav-link {% if request.endpoint in ['verify_manual', 'verify_contract'] %}active{% endif %}"
-     href="{{ url_for('verify_manual') }}">
-    Verify
-  </a>
+      <a class="nav-link {% if request.endpoint in ['verify_manual', 'verify_contract'] %}active{% endif %}"
+         href="{{ url_for('verify_manual') }}">
+        Verify
+      </a>
 
-  {% if session.get('user_id') %}
-    <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}"
-       href="{{ url_for('dashboard') }}">
-      Dashboard
-    </a>
+      {% if session.get('user_id') %}
+        <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}"
+           href="{{ url_for('dashboard') }}">
+          Dashboard
+        </a>
+      {% endif %}
+    </div>
 
-    <a class="nav-link nav-link-cta"
-       href="{{ url_for('logout') }}">
-      Logout
-    </a>
-  {% else %}
-    <a class="nav-link {% if request.endpoint == 'login' %}active{% endif %}"
-       href="{{ url_for('login') }}">
-      Login
-    </a>
+    <div class="nav-actions">
+      {% if session.get('user_id') %}
+        <a class="nav-link nav-link-logout"
+           href="{{ url_for('logout') }}">
+          Logout
+        </a>
+      {% else %}
+        <a class="nav-link {% if request.endpoint == 'login' %}active{% endif %}"
+           href="{{ url_for('login') }}">
+          Login
+        </a>
 
-    <a class="nav-link nav-link-cta {% if request.endpoint == 'register' %}active{% endif %}"
-       href="{{ url_for('register') }}">
-      Register
-    </a>
-  {% endif %}
+        <a class="nav-link nav-link-cta {% if request.endpoint == 'register' %}active{% endif %}"
+           href="{{ url_for('register') }}">
+          Register
+        </a>
+      {% endif %}
 
-  <button class="theme-switch" type="button" data-theme-toggle aria-label="Toggle theme">
-  <span class="theme-switch-track">
-    <span class="theme-switch-thumb"></span>
-  </span>
-  <span class="theme-switch-label" data-theme-label>Dark</span>
-</button>
-
-</nav>
+      <button class="theme-switch" type="button" data-theme-toggle aria-label="Toggle theme">
+        <span class="theme-switch-track">
+          <span class="theme-switch-thumb"></span>
+        </span>
+        <span class="theme-switch-label" data-theme-label>Dark</span>
+      </button>
+    </div>
+  </nav>
 </header>
 
 <main class="page-shell">
@@ -78,6 +89,6 @@
   <span>EU-PAGOTAMANHÃ</span>
   <span>Contratos assinados digitalmente · RSA · AES · HMAC</span>
 </footer>
-<script src="{{ url_for('static', filename='js/main.js') }}?v=20260528-fresh"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}?v=20260529-navactions-pill2"></script>
 </body>
 </html>
