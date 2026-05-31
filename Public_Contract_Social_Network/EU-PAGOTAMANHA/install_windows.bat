@@ -36,7 +36,7 @@ python -m pip install -r requirements.txt
 
 if not exist .env (
     echo A criar .env...
-    copy .env.example .env
+    copy env.example .env
     echo.
     echo IMPORTANTE: edita o ficheiro .env com a password correta do MariaDB/MySQL.
 ) else (
