@@ -2,7 +2,7 @@
 {% block title %}Contracts · EU-PAGOTAMANHÃ{% endblock %}
 {% block content %}
 <section class="page-hero compact">
-  <span class="eyebrow">Ledger</span><h1>Contracts</h1><p>Contratos públicos publicados e contratos em que participas.</p>
+  <span class="eyebrow">Ledger</span><h1>Contracts</h1><p>Todos os contratos registados na plataforma.</p>
 </section>
 <div class="card-grid stacked">
   {% for contract in contracts %}{% include "_contract_card.html" %}{% else %}<div class="empty-state card">Sem contratos.</div>{% endfor %}

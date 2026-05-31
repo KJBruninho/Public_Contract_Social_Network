@@ -4,6 +4,7 @@
 <section class="auth-layout">
   <div class="auth-copy card"><span class="eyebrow">New account</span><h1>Create your RSA-backed identity.</h1><p>The system generates a public/private RSA key pair. The private key is encrypted with your password.</p></div>
   <form class="form-card card" method="post">
+    {{ csrf_field() }}
     <h2>Create account</h2>
     <label>Name<input name="nome" required></label>
     <label>Email<input type="email" name="email" required></label>

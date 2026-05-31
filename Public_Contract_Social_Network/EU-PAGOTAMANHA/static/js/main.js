@@ -34,9 +34,17 @@
 
   const encryptionToggle = document.querySelector('[data-encryption-toggle]');
   const panel = document.querySelector('[data-encryption-panel]');
+  const requiredFields = document.querySelectorAll('[data-encryption-required]');
   if (encryptionToggle && panel) {
     function syncEncryptionPanel() {
-      panel.hidden = !encryptionToggle.checked;
+      const enabled = encryptionToggle.checked;
+      panel.hidden = !enabled;
+      requiredFields.forEach((field) => {
+        field.required = enabled;
+        if (!enabled) {
+          field.value = field.tagName === 'SELECT' ? 'none' : '';
+        }
+      });
     }
     encryptionToggle.addEventListener('change', syncEncryptionPanel);
     syncEncryptionPanel();

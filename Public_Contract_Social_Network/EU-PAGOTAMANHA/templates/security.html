@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Security · EU-PAGOTAMANHÃ{% endblock %}
+{% block content %}
+<section class="page-hero compact"><span class="eyebrow">Security center</span><h1>Account security</h1><p>Review MFA, password status and audit activity.</p></section>
+<section class="stats-grid">
+  <div class="stat-card"><span>Logins</span><strong>{{ stats.logins }}</strong></div>
+  <div class="stat-card"><span>Failures</span><strong>{{ stats.failures }}</strong></div>
+  <div class="stat-card"><span>OpenSSL exports</span><strong>{{ stats.openssl_exports }}</strong></div>
+</section>
+<section class="create-module card"><div class="section-head no-margin"><div><span class="eyebrow">Controls</span><h2>Security settings</h2></div></div><div class="action-cards"><a class="action-card" href="{{ url_for('mfa_setup') }}"><span></span><strong>MFA</strong><small>{% if user.mfa_enabled %}Enabled{% else %}Not enabled{% endif %}</small></a><a class="action-card" href="{{ url_for('change_password') }}"><span></span><strong>Password</strong><small>{% if password_expired %}Expired{% else %}Max age {{ password_max_age }} days{% endif %}</small></a><a class="action-card" href="{{ url_for('dashboard') }}"><span></span><strong>Contracts</strong><small>Return to workspace</small></a></div></section>
+<section class="card detail-card"><h2>Audit log</h2><div class="signature-list">{% for row in logs %}<div class="signature-row"><div><strong>{{ row.acao }}</strong><span>{{ row.data_evento }} · {{ row.ip_address or 'no ip' }}{% if row.id_contrato %} · contract #{{ row.id_contrato }}{% endif %}</span></div><span class="status-pill {% if row.sucesso %}status-assinado{% else %}status-rejeitado{% endif %}">{{ 'OK' if row.sucesso else 'FAIL' }}</span></div>{% else %}<div class="empty-state card">No audit events yet.</div>{% endfor %}</div></section>
+{% endblock %}

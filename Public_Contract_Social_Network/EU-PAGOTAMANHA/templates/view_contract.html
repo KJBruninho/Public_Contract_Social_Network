@@ -3,45 +3,14 @@
 {% block content %}
 <section class="detail-layout">
   <article class="card detail-card">
-    <div class="card-topline">
-      <span class="status-pill status-{{ contract.estado }}">{{ contract.estado|capitalize }}</span>
-      <span class="muted">#{{ contract.id }}</span>
-    </div>
-
+    <div class="card-topline"><span class="status-pill status-{{ contract.estado }}">{{ contract.estado|capitalize }}</span><span class="muted">#{{ contract.id }}</span></div>
     <h1>{{ contract.titulo }}</h1>
 
     {% if contract.encrypted_text %}
-      <div class="info-box">
-        <strong>{% if plaintext_revealed %}Encrypted period ended{% else %}Encrypted public text{% endif %}</strong>
-        <p class="muted">
-          Algorithm: <strong>{{ contract.encryption_algorithm }}</strong>.
-          HMAC: <strong>{{ contract.hmac_algorithm }}</strong>.
-          {% if contract.reveal_at %}Reveal at: <strong>{{ contract.reveal_at }}</strong>.{% endif %}
-        </p>
-      </div>
-
-      {% if plaintext_revealed %}
-        <h3>Revealed contract text</h3>
-        <div class="contract-text">{{ contract.texto_contrato }}</div>
-      {% elif private_plaintext %}
-        <div class="info-box private-plaintext-box">
-          <strong>Private preview for contract parties</strong>
-          <p class="muted small">The public ledger still shows only the ciphertext until the reveal date. This plaintext preview is shown only because you are one of the parties.</p>
-        </div>
-        <div class="contract-text">{{ private_plaintext }}</div>
-      {% else %}
-        <div class="contract-text muted">{{ contract.texto_contrato }}</div>
-      {% endif %}
-
-      <div class="code-box">
-        <strong>Visible ciphertext</strong>
-        <code>{{ contract.encrypted_text }}</code>
-      </div>
-      <div class="crypto-meta">
-        <span><strong>Salt</strong>{{ contract.encryption_salt }}</span>
-        <span><strong>IV</strong>{{ contract.encryption_iv }}</span>
-        <span><strong>HMAC</strong>{{ contract.hmac_value }}</span>
-      </div>
+      <div class="info-box"><strong>Encrypted public text</strong><p class="muted">Algorithm: <strong>{{ contract.encryption_algorithm }}</strong>. HMAC: <strong>{{ contract.hmac_algorithm }}</strong>. {% if contract.reveal_at %}Reveal at: <strong>{{ contract.reveal_at }}</strong>.{% endif %}</p></div>
+      {% if contract.plain_text_visible %}<div class="contract-text">{{ contract.texto_contrato }}</div>{% endif %}
+      <div class="code-box"><strong>Visible ciphertext</strong><code>{{ contract.encrypted_text }}</code></div>
+      <div class="crypto-meta"><span><strong>Salt</strong>{{ contract.encryption_salt }}</span><span><strong>IV</strong>{{ contract.encryption_iv }}</span><span><strong>HMAC</strong>{{ contract.hmac_value }}</span></div>
     {% else %}
       <div class="contract-text">{{ contract.texto_contrato }}</div>
     {% endif %}
@@ -52,27 +21,21 @@
     <p><span>Proponente</span><strong>{{ contract.proponente_nome }}</strong></p>
     <p><span>Aceitante</span><strong>{{ contract.aceitante_nome }}</strong></p>
     <p><span>Date</span><strong>{{ contract.data_criacao }}</strong></p>
-    {% if contract.encrypted_text %}
-      <p><span>Public text</span><strong>{{ 'Revealed' if plaintext_revealed else 'Encrypted' }}</strong></p>
-    {% endif %}
+    {% if contract_qr_image %}<div class="code-box"><strong>Public QR</strong><img src="{{ contract_qr_image }}" alt="QR code" style="width:100%;max-width:220px;background:white;padding:10px;border-radius:16px;"><code>{{ contract_url }}</code></div>{% endif %}
 
     <div class="button-stack">
       <a class="btn btn-primary" href="{{ url_for('verify_contract', contract_id=contract.id) }}">Verify signatures</a>
       <a class="btn btn-soft" href="{{ url_for('export_contract', contract_id=contract.id) }}">Export CSV</a>
+      <a class="btn btn-soft" href="{{ url_for('export_contract_openssl_zip', contract_id=contract.id) }}">Export OpenSSL ZIP</a>
+      {% if current_user and current_user.id in [contract.id_proponente, contract.id_aceitante] and contract.encrypted_text %}
+        <form method="post" action="{{ url_for('verify_contract_hmac', contract_id=contract.id) }}">{{ csrf_field() }}<label>Password<input type="password" name="password" required placeholder="Verify HMAC key"></label><button class="btn btn-ghost full" type="submit">Verify encrypted integrity</button></form>
+      {% endif %}
       {% if current_user and current_user.id in [contract.id_proponente, contract.id_aceitante] and contract.estado == 'pendente' %}
         <a class="btn btn-ghost" href="{{ url_for('sign_contract_view', contract_id=contract.id) }}">Sign contract</a>
-
-        <form method="post" action="{{ url_for('reject_contract', contract_id=contract.id) }}"
-              onsubmit="return confirm('Tens a certeza que queres rejeitar este contrato?');">
-          <button class="btn btn-danger full" type="submit">Reject contract</button>
-        </form>
+        <form method="post" action="{{ url_for('reject_contract', contract_id=contract.id) }}" onsubmit="return confirm('Tens a certeza que queres rejeitar este contrato?');">{{ csrf_field() }}<button class="btn btn-danger full" type="submit">Reject contract</button></form>
       {% endif %}
-
       {% if current_user and current_user.id == contract.id_aceitante and contract.estado == 'assinado' %}
-        <form method="post" action="{{ url_for('settle_contract', contract_id=contract.id) }}"
-              onsubmit="return confirm('Confirmas que este contrato está sanado?');">
-          <button class="btn btn-success full" type="submit">Mark as settled</button>
-        </form>
+        <form method="post" action="{{ url_for('settle_contract', contract_id=contract.id) }}" onsubmit="return confirm('Confirmas que este contrato está sanado?');">{{ csrf_field() }}<button class="btn btn-success full" type="submit">Mark as settled</button></form>
       {% endif %}
     </div>
   </aside>
@@ -82,15 +45,7 @@
   <h2>Signatures</h2>
   <div class="signature-list">
     {% for sig in signatures %}
-      <div class="signature-row">
-        <div>
-          <strong>{{ sig.nome }}</strong>
-          <span>{{ sig.tipo_assinante }}</span>
-        </div>
-        <span class="status-pill {% if sig.valid %}status-assinado{% else %}status-pendente{% endif %}">
-          {% if sig.assinatura_digital %}{{ 'Valid' if sig.valid else 'Invalid' }}{% else %}Pending{% endif %}
-        </span>
-      </div>
+      <div class="signature-row"><div><strong>{{ sig.nome }}</strong><span>{{ sig.tipo_assinante }}</span></div><span class="status-pill {% if sig.valid %}status-assinado{% else %}status-pendente{% endif %}">{% if sig.assinatura_digital %}{{ 'Valid' if sig.valid else 'Invalid' }}{% else %}Pending{% endif %}</span></div>
     {% endfor %}
   </div>
 </section>

@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from datetime import datetime
 from typing import Any
 
 import pymysql
 from dotenv import load_dotenv
-from werkzeug.security import generate_password_hash
 
 load_dotenv()
 
@@ -44,6 +42,22 @@ def get_db():
         raise
     finally:
         conn.close()
+
+
+def _ensure_column(cur, table: str, column: str, ddl: str) -> None:
+    cur.execute(f"SHOW COLUMNS FROM `{table}` LIKE %s", (column,))
+    if not cur.fetchone():
+        cur.execute(f"ALTER TABLE `{table}` ADD COLUMN {ddl}")
+
+
+def _ensure_index(cur, table: str, index_name: str, ddl: str) -> None:
+    cur.execute("""
+        SELECT COUNT(*) AS total
+        FROM information_schema.statistics
+        WHERE table_schema=%s AND table_name=%s AND index_name=%s
+    """, (DB_NAME, table, index_name))
+    if cur.fetchone()["total"] == 0:
+        cur.execute(ddl)
 
 
 def init_db() -> None:
@@ -137,6 +151,44 @@ def init_db() -> None:
                     REFERENCES utilizadores(id) ON DELETE CASCADE
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS audit_log (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                id_utilizador INT NULL,
+                email VARCHAR(180) NULL,
+                acao VARCHAR(80) NOT NULL,
+                id_contrato INT NULL,
+                sucesso BOOLEAN NOT NULL DEFAULT TRUE,
+                detalhes TEXT NULL,
+                ip_address VARCHAR(64) NULL,
+                user_agent VARCHAR(255) NULL,
+                data_evento DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_audit_user (id_utilizador),
+                INDEX idx_audit_email (email),
+                INDEX idx_audit_action (acao),
+                INDEX idx_audit_contract (id_contrato),
+                INDEX idx_audit_date (data_evento),
+                CONSTRAINT fk_audit_user FOREIGN KEY (id_utilizador)
+                    REFERENCES utilizadores(id) ON DELETE SET NULL,
+                CONSTRAINT fk_audit_contract FOREIGN KEY (id_contrato)
+                    REFERENCES contratos(id) ON DELETE SET NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+
+        # Lightweight migrations for older databases created before these fields existed.
+        _ensure_column(cur, "utilizadores", "mfa_enabled", "mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+        _ensure_column(cur, "utilizadores", "mfa_secret", "mfa_secret VARCHAR(255) NULL")
+        _ensure_column(cur, "utilizadores", "password_changed_at", "password_changed_at DATETIME NULL")
+        _ensure_column(cur, "utilizadores", "must_change_password", "must_change_password BOOLEAN NOT NULL DEFAULT FALSE")
+        _ensure_column(cur, "contratos", "visibilidade", "visibilidade ENUM('publico','privado') NOT NULL DEFAULT 'publico'")
+        _ensure_column(cur, "contratos", "encrypted_text", "encrypted_text LONGTEXT NULL")
+        _ensure_column(cur, "contratos", "encryption_iv", "encryption_iv VARCHAR(255) NULL")
+        _ensure_column(cur, "contratos", "encryption_salt", "encryption_salt VARCHAR(255) NULL")
+        _ensure_column(cur, "contratos", "encryption_algorithm", "encryption_algorithm VARCHAR(50) NULL")
+        _ensure_column(cur, "contratos", "hmac_algorithm", "hmac_algorithm VARCHAR(50) NULL")
+        _ensure_column(cur, "contratos", "hmac_value", "hmac_value LONGTEXT NULL")
+        _ensure_column(cur, "contratos", "reveal_at", "reveal_at DATETIME NULL")
+        cur.execute("UPDATE utilizadores SET password_changed_at=COALESCE(password_changed_at, data_registo, NOW())")
 
 
 def create_user(nome: str, email: str, password_hash: str, key_data: dict[str, str]) -> int:
@@ -146,7 +198,7 @@ def create_user(nome: str, email: str, password_hash: str, key_data: dict[str, s
             "INSERT INTO utilizadores (nome, email, password_hash, password_changed_at) VALUES (%s, %s, %s, NOW())",
             (nome, email, password_hash),
         )
-        user_id = cur.lastrowid
+        user_id = int(cur.lastrowid)
         cur.execute(
             """
             INSERT INTO chaves_utilizador
@@ -163,7 +215,7 @@ def create_user(nome: str, email: str, password_hash: str, key_data: dict[str, s
             ),
         )
         cur.execute("INSERT INTO password_history (id_utilizador, password_hash) VALUES (%s, %s)", (user_id, password_hash))
-        return int(user_id)
+        return user_id
 
 
 def get_user_by_email(email: str) -> dict | None:
@@ -195,6 +247,59 @@ def list_users(exclude_id: int | None = None) -> list[dict]:
         else:
             cur.execute("SELECT id, nome, email, data_registo FROM utilizadores ORDER BY nome")
         return list(cur.fetchall())
+
+
+def set_mfa(user_id: int, enabled: bool, secret: str | None = None) -> None:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE utilizadores SET mfa_enabled=%s, mfa_secret=%s WHERE id=%s",
+            (enabled, secret, user_id),
+        )
+
+
+def get_password_history(user_id: int, limit: int = 3) -> list[dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT password_hash, data_criacao
+            FROM password_history
+            WHERE id_utilizador=%s
+            ORDER BY data_criacao DESC, id DESC
+            LIMIT %s
+            """,
+            (user_id, limit),
+        )
+        return list(cur.fetchall())
+
+
+def update_user_password_and_keys(user_id: int, password_hash: str, key_data: dict[str, str]) -> None:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE utilizadores
+            SET password_hash=%s, password_changed_at=NOW(), must_change_password=FALSE
+            WHERE id=%s
+            """,
+            (password_hash, user_id),
+        )
+        cur.execute(
+            """
+            UPDATE chaves_utilizador
+            SET encrypted_private_key=%s, private_key_salt=%s, private_key_iv=%s, private_key_algorithm=%s
+            WHERE id_utilizador=%s
+            """,
+            (
+                key_data["encrypted_private_key"],
+                key_data["private_key_salt"],
+                key_data["private_key_iv"],
+                key_data.get("private_key_algorithm", "AES-256-CBC"),
+                user_id,
+            ),
+        )
+        cur.execute("INSERT INTO password_history (id_utilizador, password_hash) VALUES (%s, %s)", (user_id, password_hash))
 
 
 def create_contract(data: dict[str, Any]) -> int:
@@ -257,55 +362,45 @@ def get_public_contracts() -> list[dict]:
 
 
 def get_visible_contracts(viewer_id: int | None = None) -> list[dict]:
-    """Contracts visible in the public ledger for the current viewer.
-
-    Anonymous users see only public contracts that are already signed or settled.
-    Authenticated users also see contracts where they are one of the two parties,
-    including private, pending and rejected contracts.
-    """
-    if not viewer_id:
-        return get_public_contracts()
-    return _contract_select(
-        """
-        WHERE (c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
-           OR c.id_proponente=%s
-           OR c.id_aceitante=%s
-        """,
-        (viewer_id, viewer_id),
-    )
-
-
-def get_visible_user_contracts(profile_user_id: int, viewer_id: int | None = None) -> list[dict]:
-    """Contracts shown on a public user profile for the current viewer."""
-    if not viewer_id:
+    if viewer_id:
         return _contract_select(
             """
-            WHERE (c.id_proponente=%s OR c.id_aceitante=%s)
-              AND c.visibilidade='publico'
-              AND c.estado IN ('assinado','sanado')
+            WHERE (c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
+               OR c.id_proponente=%s
+               OR c.id_aceitante=%s
             """,
-            (profile_user_id, profile_user_id),
+            (viewer_id, viewer_id),
         )
-    return _contract_select(
-        """
-        WHERE (c.id_proponente=%s OR c.id_aceitante=%s)
-          AND (
-              (c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
-              OR c.id_proponente=%s
-              OR c.id_aceitante=%s
-          )
-        """,
-        (profile_user_id, profile_user_id, viewer_id, viewer_id),
-    )
+    return get_public_contracts()
 
 
 def get_all_contracts() -> list[dict]:
-    # Kept for admin/debug scripts. Do not use directly in public routes.
     return _contract_select()
 
 
 def get_user_contracts(user_id: int) -> list[dict]:
     return _contract_select("WHERE c.id_proponente=%s OR c.id_aceitante=%s", (user_id, user_id))
+
+
+def get_profile_contracts(profile_user_id: int, viewer_id: int | None = None) -> list[dict]:
+    if viewer_id == profile_user_id:
+        return get_user_contracts(profile_user_id)
+    if viewer_id:
+        return _contract_select(
+            """
+            WHERE (c.id_proponente=%s OR c.id_aceitante=%s)
+              AND ((c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
+                   OR c.id_proponente=%s OR c.id_aceitante=%s)
+            """,
+            (profile_user_id, profile_user_id, viewer_id, viewer_id),
+        )
+    return _contract_select(
+        """
+        WHERE (c.id_proponente=%s OR c.id_aceitante=%s)
+          AND c.visibilidade='publico' AND c.estado IN ('assinado','sanado')
+        """,
+        (profile_user_id, profile_user_id),
+    )
 
 
 def get_contract(contract_id: int) -> dict | None:
@@ -352,23 +447,101 @@ def mark_sanado(contract_id: int) -> None:
         conn.cursor().execute("UPDATE contratos SET estado='sanado' WHERE id=%s", (contract_id,))
 
 
-def seed_basic() -> None:
-    # Used by scripts/reset_and_seed.py; kept here for convenience.
-    pass
-
-
 def mark_rejeitado(contract_id: int) -> None:
     with get_db() as conn:
         conn.cursor().execute("UPDATE contratos SET estado='rejeitado' WHERE id=%s AND estado='pendente'", (contract_id,))
 
-def set_mfa(user_id: int, enabled: bool, secret: str | None = None) -> None:
+
+def add_audit_log(
+    action: str,
+    user_id: int | None = None,
+    email: str | None = None,
+    contract_id: int | None = None,
+    success: bool = True,
+    details: str | None = None,
+    ip_address: str | None = None,
+    user_agent: str | None = None,
+) -> None:
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            UPDATE utilizadores
-            SET mfa_enabled=%s, mfa_secret=%s
-            WHERE id=%s
+            INSERT INTO audit_log
+            (id_utilizador, email, acao, id_contrato, sucesso, detalhes, ip_address, user_agent)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """,
-            (enabled, secret, user_id),
+            (user_id, email, action, contract_id, success, details, ip_address, (user_agent or "")[:255]),
         )
+
+
+def count_recent_failed_logins(email: str, ip_address: str | None, window_minutes: int = 5) -> int:
+    window_minutes = max(1, min(int(window_minutes), 1440))
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM audit_log
+            WHERE acao='LOGIN_FAIL'
+              AND sucesso=FALSE
+              AND data_evento >= DATE_SUB(NOW(), INTERVAL {window_minutes} MINUTE)
+              AND (email=%s OR ip_address=%s)
+            """,
+            (email, ip_address),
+        )
+        return int(cur.fetchone()["total"])
+
+
+def get_user_audit_logs(user_id: int, limit: int = 50) -> list[dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT * FROM audit_log
+            WHERE id_utilizador=%s
+            ORDER BY data_evento DESC, id DESC
+            LIMIT %s
+            """,
+            (user_id, limit),
+        )
+        return list(cur.fetchall())
+
+
+def get_contract_audit_logs(contract_id: int, limit: int = 30) -> list[dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT l.*, u.nome, u.email AS user_email
+            FROM audit_log l
+            LEFT JOIN utilizadores u ON u.id=l.id_utilizador
+            WHERE l.id_contrato=%s
+            ORDER BY l.data_evento DESC, l.id DESC
+            LIMIT %s
+            """,
+            (contract_id, limit),
+        )
+        return list(cur.fetchall())
+
+
+def get_security_stats(user_id: int) -> dict:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) AS total FROM audit_log WHERE id_utilizador=%s AND acao='LOGIN_OK'", (user_id,))
+        logins = int(cur.fetchone()["total"])
+        cur.execute("SELECT COUNT(*) AS total FROM audit_log WHERE id_utilizador=%s AND sucesso=FALSE", (user_id,))
+        failures = int(cur.fetchone()["total"])
+        cur.execute("SELECT COUNT(*) AS total FROM audit_log WHERE id_utilizador=%s AND acao='CONTRACT_EXPORTED_OPENSSL_ZIP'", (user_id,))
+        exports = int(cur.fetchone()["total"])
+        return {"logins": logins, "failures": failures, "openssl_exports": exports}
+
+
+def update_contract_text_for_demo(contract_id: int, new_text: str) -> None:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("UPDATE contratos SET texto_contrato=%s WHERE id=%s", (new_text, contract_id))
+
+
+def seed_basic() -> None:
+    # Used by scripts/reset_and_seed.py; kept here for convenience.
+    pass

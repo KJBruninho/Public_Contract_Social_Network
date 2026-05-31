@@ -8,91 +8,27 @@
 </section>
 
 <form class="form-card wide card" method="post">
+  {{ csrf_field() }}
   <div class="form-grid two">
-    <label>
-      Title
-      <input name="titulo" required placeholder="Devo-te 10 euros">
-    </label>
-
-    <label>
-      Receiver
-      <select name="id_aceitante" required>
-        <option value="">Choose user</option>
-        {% for user in users %}
-          <option value="{{ user.id }}">{{ user.nome }} · {{ user.email }}</option>
-        {% endfor %}
-      </select>
-    </label>
+    <label>Title<input name="titulo" required placeholder="Devo-te 10 euros"></label>
+    <label>Receiver<select name="id_aceitante" required><option value="">Choose user</option>{% for user in users %}<option value="{{ user.id }}">{{ user.nome }} · {{ user.email }}</option>{% endfor %}</select></label>
   </div>
-
-  <label>
-    Contract text
-    <textarea name="texto_contrato" rows="7" required placeholder="Devo-te 10 euros mas juro que te pago amanhã!"></textarea>
-  </label>
-
+  <label>Contract text<textarea name="texto_contrato" rows="7" required placeholder="Devo-te 10 euros mas juro que te pago amanhã!"></textarea></label>
   <div class="form-grid two">
-    <label>
-      Visibility
-      <select name="visibilidade">
-        <option value="publico">Public</option>
-        <option value="privado">Private</option>
-      </select>
-    </label>
-
-    <label>
-      Your password
-      <input type="password" name="password" required placeholder="Used to decrypt your private key">
-    </label>
+    <label>Visibility<select name="visibilidade"><option value="publico">Public</option><option value="privado">Private</option></select></label>
+    <label>Your password<input type="password" name="password" required placeholder="Used to decrypt your private key"></label>
   </div>
-
   <div class="info-box">
-    <label class="check">
-      <input type="checkbox" name="encrypt_mode" value="timed" data-encryption-toggle>
-      Temporarily encrypt public contract text
-    </label>
-    <p class="muted small">
-      The original contract text is still signed. The public text can also be stored as ciphertext with a salt, IV and HMAC.
-    </p>
+    <label class="check"><input type="checkbox" name="encrypt_mode" value="timed" data-encryption-toggle>Temporarily encrypt public contract text</label>
+    <p class="muted small">The original contract text is still signed. The public text can also be stored as ciphertext with a salt, IV and HMAC.</p>
   </div>
-
   <div class="encryption-panel" data-encryption-panel hidden>
     <div class="form-grid two">
-      <label>
-        Encryption profile
-        <select name="encryption_profile">
-          <option value="none">Choose encryption profile</option>
-          <option value="AES-256-CBC:HMAC-SHA256">AES-256-CBC + HMAC-SHA256</option>
-          <option value="AES-256-CBC:HMAC-SHA512">AES-256-CBC + HMAC-SHA512</option>
-          <option value="AES-256-CTR:HMAC-SHA256">AES-256-CTR + HMAC-SHA256</option>
-          <option value="AES-256-CTR:HMAC-SHA512">AES-256-CTR + HMAC-SHA512</option>
-        </select>
-      </label>
-
-      <label>
-        Reveal at
-        <input type="datetime-local" name="reveal_at" data-reveal-at>
-      </label>
+      <label>Encryption profile<select name="encryption_profile" data-encryption-required><option value="none">Choose encryption profile</option><option value="AES-256-CBC:HMAC-SHA256">AES-256-CBC + HMAC-SHA256</option><option value="AES-256-CBC:HMAC-SHA512">AES-256-CBC + HMAC-SHA512</option><option value="AES-256-CTR:HMAC-SHA256">AES-256-CTR + HMAC-SHA256</option><option value="AES-256-CTR:HMAC-SHA512">AES-256-CTR + HMAC-SHA512</option></select></label>
+      <label>Reveal at<input type="datetime-local" name="reveal_at" data-encryption-required></label>
     </div>
-
-    <div class="crypto-options">
-      <div class="crypto-option">
-        <strong>AES-256-CBC</strong>
-        <span>Block mode with PKCS7 padding. Integrity is provided by HMAC.</span>
-      </div>
-      <div class="crypto-option">
-        <strong>AES-256-CTR</strong>
-        <span>Stream-like counter mode. Integrity is provided by HMAC.</span>
-      </div>
-      <div class="crypto-option">
-        <strong>Reveal date</strong>
-        <span>Until this date, public pages and CSV export expose only the ciphertext, salt, IV and HMAC.</span>
-      </div>
-    </div>
+    <div class="crypto-options"><div class="crypto-option"><strong>AES-256-CBC</strong><span>Block mode with PKCS7 padding. Integrity is provided by HMAC.</span></div><div class="crypto-option"><strong>AES-256-CTR</strong><span>Stream-like counter mode. Integrity is provided by HMAC.</span></div><div class="crypto-option"><strong>Salt + IV</strong><span>Every encryption generates a fresh salt and IV.</span></div></div>
   </div>
-
-  <div class="form-actions">
-    <a class="btn btn-ghost" href="{{ url_for('dashboard') }}">Cancel</a>
-    <button class="btn btn-primary" type="submit">Create and sign</button>
-  </div>
+  <div class="form-actions"><a class="btn btn-ghost" href="{{ url_for('dashboard') }}">Cancel</a><button class="btn btn-primary" type="submit">Create and sign</button></div>
 </form>
 {% endblock %}
