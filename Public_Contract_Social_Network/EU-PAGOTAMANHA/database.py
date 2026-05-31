@@ -16,16 +16,51 @@ USER = os.getenv("MYSQL_USERNAME", "root")
 PASSWORD = os.getenv("MYSQL_PASSWORD", "")
 
 
+REQUIRED_TABLES = [
+    "utilizadores",
+    "chaves_utilizador",
+    "contratos",
+    "assinaturas_contrato",
+    "password_history",
+    "audit_log",
+]
+
+REQUIRED_VIEWS = [
+    "v_contratos_com_partes",
+    "v_contratos_publicos",
+    "v_user_security_stats",
+]
+
+REQUIRED_PROCEDURES = [
+    "sp_save_signature",
+    "sp_mark_sanado",
+    "sp_mark_rejeitado",
+    "sp_add_audit_log",
+    "sp_set_mfa",
+    "sp_count_recent_failed_logins",
+    "sp_create_contract",
+]
+
+REQUIRED_TRIGGERS = [
+    "trg_contrato_no_self_contract_bi",
+    "trg_contrato_no_self_contract_bu",
+    "trg_contrato_reveal_at_check_bi",
+    "trg_contrato_reveal_at_check_bu",
+    "trg_assinatura_after_insert",
+    "trg_assinatura_after_update",
+]
+
+
 def _connect(database: str | None = DB_NAME):
-    kwargs = dict(
-        host=HOST,
-        port=PORT,
-        user=USER,
-        password=PASSWORD,
-        charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=False,
-    )
+    kwargs = {
+        "host": HOST,
+        "port": PORT,
+        "user": USER,
+        "password": PASSWORD,
+        "charset": "utf8mb4",
+        "cursorclass": pymysql.cursors.DictCursor,
+        "autocommit": False,
+    }
     if database:
         kwargs["database"] = database
     return pymysql.connect(**kwargs)
@@ -44,300 +79,13 @@ def get_db():
         conn.close()
 
 
-def _ensure_column(cur, table: str, column: str, ddl: str) -> None:
-    cur.execute(f"SHOW COLUMNS FROM `{table}` LIKE %s", (column,))
-    if not cur.fetchone():
-        cur.execute(f"ALTER TABLE `{table}` ADD COLUMN {ddl}")
-
-
-def _ensure_index(cur, table: str, index_name: str, ddl: str) -> None:
-    cur.execute(
-        """
-        SELECT COUNT(*) AS total
-        FROM information_schema.statistics
-        WHERE table_schema=%s AND table_name=%s AND index_name=%s
-        """,
-        (DB_NAME, table, index_name),
-    )
-    if cur.fetchone()["total"] == 0:
-        cur.execute(ddl)
-
-
-def _ensure_db_views(cur) -> None:
-    """Creates database views used by the app.
-
-    Views keep repeated SELECT/JOIN logic in MySQL while the Python layer keeps
-    authentication, authorization and cryptography.
-    """
-    cur.execute("""
-        CREATE OR REPLACE VIEW v_contratos_com_partes AS
-        SELECT
-            c.*,
-            p.nome AS proponente_nome,
-            p.email AS proponente_email,
-            a.nome AS aceitante_nome,
-            a.email AS aceitante_email,
-            (
-                SELECT COUNT(*)
-                FROM assinaturas_contrato s
-                WHERE s.id_contrato = c.id
-                  AND s.assinatura_digital IS NOT NULL
-            ) AS assinaturas_count
-        FROM contratos c
-        JOIN utilizadores p ON p.id = c.id_proponente
-        JOIN utilizadores a ON a.id = c.id_aceitante
-    """)
-
-    cur.execute("""
-        CREATE OR REPLACE VIEW v_contratos_publicos AS
-        SELECT *
-        FROM v_contratos_com_partes
-        WHERE visibilidade = 'publico'
-          AND estado IN ('assinado', 'sanado')
-    """)
-
-    cur.execute("""
-        CREATE OR REPLACE VIEW v_user_security_stats AS
-        SELECT
-            u.id AS id_utilizador,
-            COUNT(CASE WHEN l.acao = 'LOGIN_OK' THEN 1 END) AS logins,
-            COUNT(CASE WHEN l.sucesso = FALSE THEN 1 END) AS failures,
-            COUNT(CASE WHEN l.acao = 'CONTRACT_EXPORTED_OPENSSL_ZIP' THEN 1 END) AS openssl_exports
-        FROM utilizadores u
-        LEFT JOIN audit_log l ON l.id_utilizador = u.id
-        GROUP BY u.id
-    """)
-
-
-def _ensure_db_triggers(cur) -> None:
-    """Creates DB-level integrity triggers.
-
-    These triggers enforce simple contract invariants and state transitions.
-    They deliberately do not perform cryptography.
-    """
-    for trigger_name in (
-        "trg_contrato_no_self_contract_bi",
-        "trg_contrato_no_self_contract_bu",
-        "trg_contrato_reveal_at_check_bi",
-        "trg_contrato_reveal_at_check_bu",
-        "trg_assinatura_after_insert",
-        "trg_assinatura_after_update",
-    ):
-        cur.execute(f"DROP TRIGGER IF EXISTS `{trigger_name}`")
-
-    cur.execute("""
-        CREATE TRIGGER trg_contrato_no_self_contract_bi
-        BEFORE INSERT ON contratos
-        FOR EACH ROW
-        BEGIN
-            IF NEW.id_proponente = NEW.id_aceitante THEN
-                SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Proponente e aceitante não podem ser o mesmo utilizador';
-            END IF;
-        END
-    """)
-
-    cur.execute("""
-        CREATE TRIGGER trg_contrato_no_self_contract_bu
-        BEFORE UPDATE ON contratos
-        FOR EACH ROW
-        BEGIN
-            IF NEW.id_proponente = NEW.id_aceitante THEN
-                SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Proponente e aceitante não podem ser o mesmo utilizador';
-            END IF;
-        END
-    """)
-
-    cur.execute("""
-        CREATE TRIGGER trg_contrato_reveal_at_check_bi
-        BEFORE INSERT ON contratos
-        FOR EACH ROW
-        BEGIN
-            IF NEW.encrypted_text IS NOT NULL AND NEW.reveal_at IS NULL THEN
-                SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Contrato cifrado precisa de reveal_at';
-            END IF;
-        END
-    """)
-
-    cur.execute("""
-        CREATE TRIGGER trg_contrato_reveal_at_check_bu
-        BEFORE UPDATE ON contratos
-        FOR EACH ROW
-        BEGIN
-            IF NEW.encrypted_text IS NOT NULL AND NEW.reveal_at IS NULL THEN
-                SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Contrato cifrado precisa de reveal_at';
-            END IF;
-        END
-    """)
-
-    cur.execute("""
-        CREATE TRIGGER trg_assinatura_after_insert
-        AFTER INSERT ON assinaturas_contrato
-        FOR EACH ROW
-        BEGIN
-            IF NEW.assinatura_digital IS NOT NULL THEN
-                UPDATE contratos
-                SET estado = 'assinado'
-                WHERE id = NEW.id_contrato
-                  AND estado = 'pendente'
-                  AND (
-                      SELECT COUNT(*)
-                      FROM assinaturas_contrato
-                      WHERE id_contrato = NEW.id_contrato
-                        AND assinatura_digital IS NOT NULL
-                  ) >= 2;
-            END IF;
-        END
-    """)
-
-    cur.execute("""
-        CREATE TRIGGER trg_assinatura_after_update
-        AFTER UPDATE ON assinaturas_contrato
-        FOR EACH ROW
-        BEGIN
-            IF NEW.assinatura_digital IS NOT NULL THEN
-                UPDATE contratos
-                SET estado = 'assinado'
-                WHERE id = NEW.id_contrato
-                  AND estado = 'pendente'
-                  AND (
-                      SELECT COUNT(*)
-                      FROM assinaturas_contrato
-                      WHERE id_contrato = NEW.id_contrato
-                        AND assinatura_digital IS NOT NULL
-                  ) >= 2;
-            END IF;
-        END
-    """)
-
-
-def _ensure_db_procedures(cur) -> None:
-    """Creates stored procedures for transactional DB operations."""
-    for procedure_name in (
-        "sp_save_signature",
-        "sp_mark_sanado",
-        "sp_mark_rejeitado",
-        "sp_add_audit_log",
-    ):
-        cur.execute(f"DROP PROCEDURE IF EXISTS `{procedure_name}`")
-
-    cur.execute("""
-        CREATE PROCEDURE sp_save_signature(
-            IN p_contract_id INT,
-            IN p_user_id INT,
-            IN p_signature LONGTEXT
-        )
-        BEGIN
-            UPDATE assinaturas_contrato
-            SET assinatura_digital = p_signature,
-                data_assinatura = NOW()
-            WHERE id_contrato = p_contract_id
-              AND id_utilizador = p_user_id
-              AND assinatura_digital IS NULL;
-
-            IF ROW_COUNT() = 0 THEN
-                SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Assinatura inexistente, duplicada ou utilizador inválido';
-            END IF;
-        END
-    """)
-
-    cur.execute("""
-        CREATE PROCEDURE sp_mark_sanado(
-            IN p_contract_id INT,
-            IN p_user_id INT
-        )
-        BEGIN
-            UPDATE contratos
-            SET estado = 'sanado'
-            WHERE id = p_contract_id
-              AND id_aceitante = p_user_id
-              AND estado = 'assinado';
-
-            IF ROW_COUNT() = 0 THEN
-                SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Só o aceitante pode marcar contrato assinado como sanado';
-            END IF;
-        END
-    """)
-
-    cur.execute("""
-        CREATE PROCEDURE sp_mark_rejeitado(
-            IN p_contract_id INT,
-            IN p_user_id INT
-        )
-        BEGIN
-            UPDATE contratos
-            SET estado = 'rejeitado'
-            WHERE id = p_contract_id
-              AND estado = 'pendente'
-              AND (id_proponente = p_user_id OR id_aceitante = p_user_id);
-
-            IF ROW_COUNT() = 0 THEN
-                SIGNAL SQLSTATE '45000'
-                SET MESSAGE_TEXT = 'Só uma parte pode rejeitar contrato pendente';
-            END IF;
-        END
-    """)
-
-    cur.execute("""
-        CREATE PROCEDURE sp_add_audit_log(
-            IN p_user_id INT,
-            IN p_email VARCHAR(180),
-            IN p_action VARCHAR(80),
-            IN p_contract_id INT,
-            IN p_success BOOLEAN,
-            IN p_details TEXT,
-            IN p_ip VARCHAR(64),
-            IN p_user_agent VARCHAR(255)
-        )
-        BEGIN
-            INSERT INTO audit_log
-            (id_utilizador, email, acao, id_contrato, sucesso, detalhes, ip_address, user_agent)
-            VALUES
-            (p_user_id, p_email, p_action, p_contract_id, p_success, p_details, p_ip, LEFT(COALESCE(p_user_agent, ''), 255));
-        END
-    """)
-
-
-def _ensure_db_routines(cur) -> None:
-    _ensure_db_views(cur)
-    _ensure_db_triggers(cur)
-    _ensure_db_procedures(cur)
-
-
 def init_db() -> None:
-    """Valida que a base de dados já foi criada pelos scripts SQL."""
-
-    required_tables = [
-        "utilizadores",
-        "chaves_utilizador",
-        "contratos",
-        "assinaturas_contrato",
-        "password_history",
-        "audit_log",
-    ]
-
-    required_views = [
-        "v_contratos_com_partes",
-        "v_contratos_publicos",
-        "v_user_security_stats",
-    ]
-
-    required_procedures = [
-        "sp_save_signature",
-        "sp_mark_sanado",
-        "sp_mark_rejeitado",
-        "sp_add_audit_log",
-    ]
+    """Valida que a BD foi criada pelos scripts SQL antes de arrancar a app."""
 
     with get_db() as conn:
         cur = conn.cursor()
 
-        for table in required_tables:
+        for table in REQUIRED_TABLES:
             cur.execute(
                 """
                 SELECT COUNT(*) AS total
@@ -351,10 +99,10 @@ def init_db() -> None:
             if cur.fetchone()["total"] == 0:
                 raise RuntimeError(
                     f"Tabela obrigatória em falta: {table}. "
-                    "Executa scripts/reset_and_seed.py antes de arrancar a app."
+                    "Executa init.sql da BD."
                 )
 
-        for view in required_views:
+        for view in REQUIRED_VIEWS:
             cur.execute(
                 """
                 SELECT COUNT(*) AS total
@@ -367,10 +115,10 @@ def init_db() -> None:
             if cur.fetchone()["total"] == 0:
                 raise RuntimeError(
                     f"View obrigatória em falta: {view}. "
-                    "Executa scripts/db_routines.sql ou scripts/reset_and_seed.py."
+                    "Executa init.sql da BD."
                 )
 
-        for procedure in required_procedures:
+        for procedure in REQUIRED_PROCEDURES:
             cur.execute(
                 """
                 SELECT COUNT(*) AS total
@@ -384,21 +132,50 @@ def init_db() -> None:
             if cur.fetchone()["total"] == 0:
                 raise RuntimeError(
                     f"Procedure obrigatória em falta: {procedure}. "
-                    "Executa scripts/db_routines.sql ou scripts/reset_and_seed.py."
+                    "Executa init.sql da BD."
                 )
 
+        for trigger in REQUIRED_TRIGGERS:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM information_schema.triggers
+                WHERE trigger_schema=%s
+                  AND trigger_name=%s
+                """,
+                (DB_NAME, trigger),
+            )
+            if cur.fetchone()["total"] == 0:
+                raise RuntimeError(
+                    f"Trigger obrigatório em falta: {trigger}. "
+                    "Executa init.sql da BD."
+                )
+
+
+# ---------------------------------------------------------------------------
+# Utilizadores e chaves
+# ---------------------------------------------------------------------------
+
 def create_user(nome: str, email: str, password_hash: str, key_data: dict[str, str]) -> int:
+    """Cria utilizador, guarda par de chaves e regista a password inicial."""
+
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO utilizadores (nome, email, password_hash, password_changed_at) VALUES (%s, %s, %s, NOW())",
+            """
+            INSERT INTO utilizadores
+            (nome, email, password_hash, password_changed_at)
+            VALUES (%s, %s, %s, NOW())
+            """,
             (nome, email, password_hash),
         )
         user_id = int(cur.lastrowid)
+
         cur.execute(
             """
             INSERT INTO chaves_utilizador
-            (id_utilizador, public_key, encrypted_private_key, private_key_salt, private_key_iv, private_key_algorithm)
+            (id_utilizador, public_key, encrypted_private_key,
+             private_key_salt, private_key_iv, private_key_algorithm)
             VALUES (%s, %s, %s, %s, %s, %s)
             """,
             (
@@ -410,28 +187,36 @@ def create_user(nome: str, email: str, password_hash: str, key_data: dict[str, s
                 key_data.get("private_key_algorithm", "AES-256-CBC"),
             ),
         )
-        cur.execute("INSERT INTO password_history (id_utilizador, password_hash) VALUES (%s, %s)", (user_id, password_hash))
+
+        cur.execute(
+            """
+            INSERT INTO password_history (id_utilizador, password_hash)
+            VALUES (%s, %s)
+            """,
+            (user_id, password_hash),
+        )
+
         return user_id
 
 
 def get_user_by_email(email: str) -> dict | None:
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM utilizadores WHERE email = %s", (email,))
+        cur.execute("SELECT * FROM utilizadores WHERE email=%s", (email,))
         return cur.fetchone()
 
 
 def get_user(user_id: int) -> dict | None:
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM utilizadores WHERE id = %s", (user_id,))
+        cur.execute("SELECT * FROM utilizadores WHERE id=%s", (user_id,))
         return cur.fetchone()
 
 
 def get_user_keys(user_id: int) -> dict | None:
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT * FROM chaves_utilizador WHERE id_utilizador = %s", (user_id,))
+        cur.execute("SELECT * FROM chaves_utilizador WHERE id_utilizador=%s", (user_id,))
         return cur.fetchone()
 
 
@@ -439,19 +224,29 @@ def list_users(exclude_id: int | None = None) -> list[dict]:
     with get_db() as conn:
         cur = conn.cursor()
         if exclude_id:
-            cur.execute("SELECT id, nome, email, data_registo FROM utilizadores WHERE id <> %s ORDER BY nome", (exclude_id,))
+            cur.execute(
+                """
+                SELECT id, nome, email, data_registo
+                FROM utilizadores
+                WHERE id <> %s
+                ORDER BY nome
+                """,
+                (exclude_id,),
+            )
         else:
-            cur.execute("SELECT id, nome, email, data_registo FROM utilizadores ORDER BY nome")
+            cur.execute(
+                """
+                SELECT id, nome, email, data_registo
+                FROM utilizadores
+                ORDER BY nome
+                """
+            )
         return list(cur.fetchall())
 
 
 def set_mfa(user_id: int, enabled: bool, secret: str | None = None) -> None:
     with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE utilizadores SET mfa_enabled=%s, mfa_secret=%s WHERE id=%s",
-            (enabled, secret, user_id),
-        )
+        conn.cursor().callproc("sp_set_mfa", (user_id, enabled, secret))
 
 
 def get_password_history(user_id: int, limit: int = 3) -> list[dict]:
@@ -471,20 +266,28 @@ def get_password_history(user_id: int, limit: int = 3) -> list[dict]:
 
 
 def update_user_password_and_keys(user_id: int, password_hash: str, key_data: dict[str, str]) -> None:
+    """Atualiza password e recifra a chave privada com a nova password."""
+
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
             """
             UPDATE utilizadores
-            SET password_hash=%s, password_changed_at=NOW(), must_change_password=FALSE
+            SET password_hash=%s,
+                password_changed_at=NOW(),
+                must_change_password=FALSE
             WHERE id=%s
             """,
             (password_hash, user_id),
         )
+
         cur.execute(
             """
             UPDATE chaves_utilizador
-            SET encrypted_private_key=%s, private_key_salt=%s, private_key_iv=%s, private_key_algorithm=%s
+            SET encrypted_private_key=%s,
+                private_key_salt=%s,
+                private_key_iv=%s,
+                private_key_algorithm=%s
             WHERE id_utilizador=%s
             """,
             (
@@ -495,44 +298,50 @@ def update_user_password_and_keys(user_id: int, password_hash: str, key_data: di
                 user_id,
             ),
         )
-        cur.execute("INSERT INTO password_history (id_utilizador, password_hash) VALUES (%s, %s)", (user_id, password_hash))
 
+        cur.execute(
+            """
+            INSERT INTO password_history (id_utilizador, password_hash)
+            VALUES (%s, %s)
+            """,
+            (user_id, password_hash),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Contratos
+# ---------------------------------------------------------------------------
 
 def create_contract(data: dict[str, Any]) -> int:
+    """Cria contrato e assinaturas iniciais através da procedure da BD."""
+
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO contratos
-            (titulo, texto_contrato, id_proponente, id_aceitante, estado, visibilidade, data_criacao,
-             encrypted_text, encryption_iv, encryption_salt, encryption_algorithm, hmac_algorithm, hmac_value, reveal_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """,
+        cur.callproc(
+            "sp_create_contract",
             (
-                data["titulo"], data["texto_contrato"], data["id_proponente"], data["id_aceitante"],
-                data.get("estado", "pendente"), data.get("visibilidade", "publico"), data["data_criacao"],
-                data.get("encrypted_text"), data.get("encryption_iv"), data.get("encryption_salt"),
-                data.get("encryption_algorithm"), data.get("hmac_algorithm"), data.get("hmac_value"), data.get("reveal_at"),
+                data["titulo"],
+                data["texto_contrato"],
+                data["id_proponente"],
+                data["id_aceitante"],
+                data.get("estado", "pendente"),
+                data.get("visibilidade", "publico"),
+                data["data_criacao"],
+                data.get("encrypted_text"),
+                data.get("encryption_iv"),
+                data.get("encryption_salt"),
+                data.get("encryption_algorithm"),
+                data.get("hmac_algorithm"),
+                data.get("hmac_value"),
+                data.get("reveal_at"),
+                data.get("proponente_signature"),
+                data.get("proponente_signed_at"),
             ),
         )
-        contract_id = int(cur.lastrowid)
-        cur.execute(
-            """
-            INSERT INTO assinaturas_contrato
-            (id_contrato, id_utilizador, tipo_assinante, assinatura_digital, data_assinatura)
-            VALUES (%s, %s, 'proponente', %s, %s)
-            """,
-            (contract_id, data["id_proponente"], data.get("proponente_signature"), data.get("proponente_signed_at")),
-        )
-        cur.execute(
-            """
-            INSERT INTO assinaturas_contrato
-            (id_contrato, id_utilizador, tipo_assinante, assinatura_digital, data_assinatura)
-            VALUES (%s, %s, 'aceitante', NULL, NULL)
-            """,
-            (contract_id, data["id_aceitante"]),
-        )
-        return contract_id
+        row = cur.fetchone()
+        if not row:
+            raise RuntimeError("sp_create_contract não devolveu contract_id.")
+        return int(row["contract_id"])
 
 
 def _contract_select(extra_where: str = "", params: tuple = ()) -> list[dict]:
@@ -556,16 +365,17 @@ def get_public_contracts() -> list[dict]:
 
 
 def get_visible_contracts(viewer_id: int | None = None) -> list[dict]:
-    if viewer_id:
-        return _contract_select(
-            """
-            WHERE (c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
-               OR c.id_proponente=%s
-               OR c.id_aceitante=%s
-            """,
-            (viewer_id, viewer_id),
-        )
-    return get_public_contracts()
+    if not viewer_id:
+        return get_public_contracts()
+
+    return _contract_select(
+        """
+        WHERE (c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
+           OR c.id_proponente=%s
+           OR c.id_aceitante=%s
+        """,
+        (viewer_id, viewer_id),
+    )
 
 
 def get_all_contracts() -> list[dict]:
@@ -573,25 +383,34 @@ def get_all_contracts() -> list[dict]:
 
 
 def get_user_contracts(user_id: int) -> list[dict]:
-    return _contract_select("WHERE c.id_proponente=%s OR c.id_aceitante=%s", (user_id, user_id))
+    return _contract_select(
+        "WHERE c.id_proponente=%s OR c.id_aceitante=%s",
+        (user_id, user_id),
+    )
 
 
 def get_profile_contracts(profile_user_id: int, viewer_id: int | None = None) -> list[dict]:
     if viewer_id == profile_user_id:
         return get_user_contracts(profile_user_id)
+
     if viewer_id:
         return _contract_select(
             """
             WHERE (c.id_proponente=%s OR c.id_aceitante=%s)
-              AND ((c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
-                   OR c.id_proponente=%s OR c.id_aceitante=%s)
+              AND (
+                    (c.visibilidade='publico' AND c.estado IN ('assinado','sanado'))
+                 OR c.id_proponente=%s
+                 OR c.id_aceitante=%s
+              )
             """,
             (profile_user_id, profile_user_id, viewer_id, viewer_id),
         )
+
     return _contract_select(
         """
         WHERE (c.id_proponente=%s OR c.id_aceitante=%s)
-          AND c.visibilidade='publico' AND c.estado IN ('assinado','sanado')
+          AND c.visibilidade='publico'
+          AND c.estado IN ('assinado','sanado')
         """,
         (profile_user_id, profile_user_id),
     )
@@ -620,43 +439,35 @@ def get_contract_signatures(contract_id: int) -> list[dict]:
 
 
 def save_signature(contract_id: int, user_id: int, signature: str) -> None:
-    """Saves a signature through a stored procedure.
-
-    The trigger trg_assinatura_after_update changes the contract state to
-    'assinado' when both signatures exist.
-    """
+    # A trigger atualiza o estado para 'assinado' quando ambas as assinaturas existem.
     with get_db() as conn:
         conn.cursor().callproc("sp_save_signature", (contract_id, user_id, signature))
 
 
-def mark_sanado(contract_id: int, user_id: int | None = None) -> None:
-    """Marks a contract as settled.
+def mark_sanado(contract_id: int, user_id: int) -> None:
+    with get_db() as conn:
+        conn.cursor().callproc("sp_mark_sanado", (contract_id, user_id))
 
-    If user_id is supplied, the DB procedure enforces that the user is the
-    aceitante. Without user_id, this keeps backward compatibility with older
-    app.py versions that already check permissions before calling this function.
-    """
+
+def mark_rejeitado(contract_id: int, user_id: int) -> None:
+    with get_db() as conn:
+        conn.cursor().callproc("sp_mark_rejeitado", (contract_id, user_id))
+
+
+def update_contract_text_for_demo(contract_id: int, new_text: str) -> None:
+    """Usado apenas para a demonstração de ataque/tampering."""
+
     with get_db() as conn:
         cur = conn.cursor()
-        if user_id is None:
-            cur.execute("UPDATE contratos SET estado='sanado' WHERE id=%s", (contract_id,))
-        else:
-            cur.callproc("sp_mark_sanado", (contract_id, user_id))
+        cur.execute(
+            "UPDATE contratos SET texto_contrato=%s WHERE id=%s",
+            (new_text, contract_id),
+        )
 
 
-def mark_rejeitado(contract_id: int, user_id: int | None = None) -> None:
-    """Rejects a pending contract.
-
-    If user_id is supplied, the DB procedure enforces that the user is one of
-    the two parties. Without user_id, this keeps compatibility with old app.py.
-    """
-    with get_db() as conn:
-        cur = conn.cursor()
-        if user_id is None:
-            cur.execute("UPDATE contratos SET estado='rejeitado' WHERE id=%s AND estado='pendente'", (contract_id,))
-        else:
-            cur.callproc("sp_mark_rejeitado", (contract_id, user_id))
-
+# ---------------------------------------------------------------------------
+# Auditoria e segurança
+# ---------------------------------------------------------------------------
 
 def add_audit_log(
     action: str,
@@ -671,7 +482,16 @@ def add_audit_log(
     with get_db() as conn:
         conn.cursor().callproc(
             "sp_add_audit_log",
-            (user_id, email, action, contract_id, success, details, ip_address, (user_agent or "")[:255]),
+            (
+                user_id,
+                email,
+                action,
+                contract_id,
+                success,
+                details,
+                ip_address,
+                (user_agent or "")[:255],
+            ),
         )
 
 
@@ -679,18 +499,9 @@ def count_recent_failed_logins(email: str, ip_address: str | None, window_minute
     window_minutes = max(1, min(int(window_minutes), 1440))
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute(
-            f"""
-            SELECT COUNT(*) AS total
-            FROM audit_log
-            WHERE acao='LOGIN_FAIL'
-              AND sucesso=FALSE
-              AND data_evento >= DATE_SUB(NOW(), INTERVAL {window_minutes} MINUTE)
-              AND (email=%s OR ip_address=%s)
-            """,
-            (email, ip_address),
-        )
-        return int(cur.fetchone()["total"])
+        cur.callproc("sp_count_recent_failed_logins", (email, ip_address, window_minutes))
+        row = cur.fetchone()
+        return int(row["total"] if row else 0)
 
 
 def get_user_audit_logs(user_id: int, limit: int = 50) -> list[dict]:
@@ -698,7 +509,8 @@ def get_user_audit_logs(user_id: int, limit: int = 50) -> list[dict]:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT * FROM audit_log
+            SELECT *
+            FROM audit_log
             WHERE id_utilizador=%s
             ORDER BY data_evento DESC, id DESC
             LIMIT %s
@@ -737,21 +549,12 @@ def get_security_stats(user_id: int) -> dict:
             (user_id,),
         )
         row = cur.fetchone()
-        if not row:
-            return {"logins": 0, "failures": 0, "openssl_exports": 0}
-        return {
-            "logins": int(row["logins"] or 0),
-            "failures": int(row["failures"] or 0),
-            "openssl_exports": int(row["openssl_exports"] or 0),
-        }
 
+    if not row:
+        return {"logins": 0, "failures": 0, "openssl_exports": 0}
 
-def update_contract_text_for_demo(contract_id: int, new_text: str) -> None:
-    with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute("UPDATE contratos SET texto_contrato=%s WHERE id=%s", (new_text, contract_id))
-
-
-def seed_basic() -> None:
-    # Used by scripts/reset_and_seed.py; kept here for convenience.
-    pass
+    return {
+        "logins": int(row["logins"] or 0),
+        "failures": int(row["failures"] or 0),
+        "openssl_exports": int(row["openssl_exports"] or 0),
+    }

@@ -586,21 +586,16 @@ def verify_contract(contract_id: int):
     audit("SIGNATURE_VERIFIED", contract_id=contract_id)
     return render_template("verify.html", contract=contract, signatures=rows)
 
+
 @app.route("/verify", methods=["GET", "POST"])
 def verify_manual():
     result = None
     if request.method == "POST":
-        public_key = request.form.get("public_key", "").strip()
+        public_key = request.form.get("public_key", "")
         payload = request.form.get("payload", "")
-
-        # Normaliza o texto colado no textarea.
-        # O payload canónico usa LF (\n), sem linha extra no fim.
-        payload = payload.replace("\r\n", "\n").replace("\r", "\n")
-        payload = payload.strip("\n")
-
-        signature = request.form.get("signature", "").strip()
+        signature = request.form.get("signature", "")
         result = crypto.verify_signature(public_key, payload.encode("utf-8"), signature)
-
+        audit("MANUAL_SIGNATURE_VERIFY", success=bool(result))
     return render_template("verify_manual.html", result=result)
 
 
@@ -633,7 +628,7 @@ def settle_contract(contract_id: int):
     if contract["estado"] != "assinado":
         flash("Só contratos assinados podem ser marcados como sanados.", "warning")
         return redirect(url_for("view_contract", contract_id=contract_id))
-    db.mark_sanado(contract_id)
+    db.mark_sanado(contract_id, session["user_id"])
     audit("CONTRACT_SETTLED", contract_id=contract_id)
     flash("Contrato marcado como sanado.", "success")
     return redirect(url_for("view_contract", contract_id=contract_id))
@@ -652,7 +647,7 @@ def reject_contract(contract_id: int):
     if contract["estado"] != "pendente":
         flash("Só contratos pendentes podem ser rejeitados.", "warning")
         return redirect(url_for("view_contract", contract_id=contract_id))
-    db.mark_rejeitado(contract_id)
+    db.mark_rejeitado(contract_id, session["user_id"])
     audit("CONTRACT_REJECTED", contract_id=contract_id)
     flash("Contrato rejeitado.", "success")
     return redirect(url_for("view_contract", contract_id=contract_id))
