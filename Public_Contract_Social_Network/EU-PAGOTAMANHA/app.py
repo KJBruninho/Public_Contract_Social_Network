@@ -586,16 +586,21 @@ def verify_contract(contract_id: int):
     audit("SIGNATURE_VERIFIED", contract_id=contract_id)
     return render_template("verify.html", contract=contract, signatures=rows)
 
-
 @app.route("/verify", methods=["GET", "POST"])
 def verify_manual():
     result = None
     if request.method == "POST":
-        public_key = request.form.get("public_key", "")
+        public_key = request.form.get("public_key", "").strip()
         payload = request.form.get("payload", "")
-        signature = request.form.get("signature", "")
+
+        # Normaliza o texto colado no textarea.
+        # O payload canónico usa LF (\n), sem linha extra no fim.
+        payload = payload.replace("\r\n", "\n").replace("\r", "\n")
+        payload = payload.strip("\n")
+
+        signature = request.form.get("signature", "").strip()
         result = crypto.verify_signature(public_key, payload.encode("utf-8"), signature)
-        audit("MANUAL_SIGNATURE_VERIFY", success=bool(result))
+
     return render_template("verify_manual.html", result=result)
 
 
