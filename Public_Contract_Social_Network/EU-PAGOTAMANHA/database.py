@@ -51,145 +51,341 @@ def _ensure_column(cur, table: str, column: str, ddl: str) -> None:
 
 
 def _ensure_index(cur, table: str, index_name: str, ddl: str) -> None:
-    cur.execute("""
+    cur.execute(
+        """
         SELECT COUNT(*) AS total
         FROM information_schema.statistics
         WHERE table_schema=%s AND table_name=%s AND index_name=%s
-    """, (DB_NAME, table, index_name))
+        """,
+        (DB_NAME, table, index_name),
+    )
     if cur.fetchone()["total"] == 0:
         cur.execute(ddl)
 
 
+def _ensure_db_views(cur) -> None:
+    """Creates database views used by the app.
+
+    Views keep repeated SELECT/JOIN logic in MySQL while the Python layer keeps
+    authentication, authorization and cryptography.
+    """
+    cur.execute("""
+        CREATE OR REPLACE VIEW v_contratos_com_partes AS
+        SELECT
+            c.*,
+            p.nome AS proponente_nome,
+            p.email AS proponente_email,
+            a.nome AS aceitante_nome,
+            a.email AS aceitante_email,
+            (
+                SELECT COUNT(*)
+                FROM assinaturas_contrato s
+                WHERE s.id_contrato = c.id
+                  AND s.assinatura_digital IS NOT NULL
+            ) AS assinaturas_count
+        FROM contratos c
+        JOIN utilizadores p ON p.id = c.id_proponente
+        JOIN utilizadores a ON a.id = c.id_aceitante
+    """)
+
+    cur.execute("""
+        CREATE OR REPLACE VIEW v_contratos_publicos AS
+        SELECT *
+        FROM v_contratos_com_partes
+        WHERE visibilidade = 'publico'
+          AND estado IN ('assinado', 'sanado')
+    """)
+
+    cur.execute("""
+        CREATE OR REPLACE VIEW v_user_security_stats AS
+        SELECT
+            u.id AS id_utilizador,
+            COUNT(CASE WHEN l.acao = 'LOGIN_OK' THEN 1 END) AS logins,
+            COUNT(CASE WHEN l.sucesso = FALSE THEN 1 END) AS failures,
+            COUNT(CASE WHEN l.acao = 'CONTRACT_EXPORTED_OPENSSL_ZIP' THEN 1 END) AS openssl_exports
+        FROM utilizadores u
+        LEFT JOIN audit_log l ON l.id_utilizador = u.id
+        GROUP BY u.id
+    """)
+
+
+def _ensure_db_triggers(cur) -> None:
+    """Creates DB-level integrity triggers.
+
+    These triggers enforce simple contract invariants and state transitions.
+    They deliberately do not perform cryptography.
+    """
+    for trigger_name in (
+        "trg_contrato_no_self_contract_bi",
+        "trg_contrato_no_self_contract_bu",
+        "trg_contrato_reveal_at_check_bi",
+        "trg_contrato_reveal_at_check_bu",
+        "trg_assinatura_after_insert",
+        "trg_assinatura_after_update",
+    ):
+        cur.execute(f"DROP TRIGGER IF EXISTS `{trigger_name}`")
+
+    cur.execute("""
+        CREATE TRIGGER trg_contrato_no_self_contract_bi
+        BEFORE INSERT ON contratos
+        FOR EACH ROW
+        BEGIN
+            IF NEW.id_proponente = NEW.id_aceitante THEN
+                SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Proponente e aceitante não podem ser o mesmo utilizador';
+            END IF;
+        END
+    """)
+
+    cur.execute("""
+        CREATE TRIGGER trg_contrato_no_self_contract_bu
+        BEFORE UPDATE ON contratos
+        FOR EACH ROW
+        BEGIN
+            IF NEW.id_proponente = NEW.id_aceitante THEN
+                SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Proponente e aceitante não podem ser o mesmo utilizador';
+            END IF;
+        END
+    """)
+
+    cur.execute("""
+        CREATE TRIGGER trg_contrato_reveal_at_check_bi
+        BEFORE INSERT ON contratos
+        FOR EACH ROW
+        BEGIN
+            IF NEW.encrypted_text IS NOT NULL AND NEW.reveal_at IS NULL THEN
+                SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Contrato cifrado precisa de reveal_at';
+            END IF;
+        END
+    """)
+
+    cur.execute("""
+        CREATE TRIGGER trg_contrato_reveal_at_check_bu
+        BEFORE UPDATE ON contratos
+        FOR EACH ROW
+        BEGIN
+            IF NEW.encrypted_text IS NOT NULL AND NEW.reveal_at IS NULL THEN
+                SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Contrato cifrado precisa de reveal_at';
+            END IF;
+        END
+    """)
+
+    cur.execute("""
+        CREATE TRIGGER trg_assinatura_after_insert
+        AFTER INSERT ON assinaturas_contrato
+        FOR EACH ROW
+        BEGIN
+            IF NEW.assinatura_digital IS NOT NULL THEN
+                UPDATE contratos
+                SET estado = 'assinado'
+                WHERE id = NEW.id_contrato
+                  AND estado = 'pendente'
+                  AND (
+                      SELECT COUNT(*)
+                      FROM assinaturas_contrato
+                      WHERE id_contrato = NEW.id_contrato
+                        AND assinatura_digital IS NOT NULL
+                  ) >= 2;
+            END IF;
+        END
+    """)
+
+    cur.execute("""
+        CREATE TRIGGER trg_assinatura_after_update
+        AFTER UPDATE ON assinaturas_contrato
+        FOR EACH ROW
+        BEGIN
+            IF NEW.assinatura_digital IS NOT NULL THEN
+                UPDATE contratos
+                SET estado = 'assinado'
+                WHERE id = NEW.id_contrato
+                  AND estado = 'pendente'
+                  AND (
+                      SELECT COUNT(*)
+                      FROM assinaturas_contrato
+                      WHERE id_contrato = NEW.id_contrato
+                        AND assinatura_digital IS NOT NULL
+                  ) >= 2;
+            END IF;
+        END
+    """)
+
+
+def _ensure_db_procedures(cur) -> None:
+    """Creates stored procedures for transactional DB operations."""
+    for procedure_name in (
+        "sp_save_signature",
+        "sp_mark_sanado",
+        "sp_mark_rejeitado",
+        "sp_add_audit_log",
+    ):
+        cur.execute(f"DROP PROCEDURE IF EXISTS `{procedure_name}`")
+
+    cur.execute("""
+        CREATE PROCEDURE sp_save_signature(
+            IN p_contract_id INT,
+            IN p_user_id INT,
+            IN p_signature LONGTEXT
+        )
+        BEGIN
+            UPDATE assinaturas_contrato
+            SET assinatura_digital = p_signature,
+                data_assinatura = NOW()
+            WHERE id_contrato = p_contract_id
+              AND id_utilizador = p_user_id
+              AND assinatura_digital IS NULL;
+
+            IF ROW_COUNT() = 0 THEN
+                SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Assinatura inexistente, duplicada ou utilizador inválido';
+            END IF;
+        END
+    """)
+
+    cur.execute("""
+        CREATE PROCEDURE sp_mark_sanado(
+            IN p_contract_id INT,
+            IN p_user_id INT
+        )
+        BEGIN
+            UPDATE contratos
+            SET estado = 'sanado'
+            WHERE id = p_contract_id
+              AND id_aceitante = p_user_id
+              AND estado = 'assinado';
+
+            IF ROW_COUNT() = 0 THEN
+                SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Só o aceitante pode marcar contrato assinado como sanado';
+            END IF;
+        END
+    """)
+
+    cur.execute("""
+        CREATE PROCEDURE sp_mark_rejeitado(
+            IN p_contract_id INT,
+            IN p_user_id INT
+        )
+        BEGIN
+            UPDATE contratos
+            SET estado = 'rejeitado'
+            WHERE id = p_contract_id
+              AND estado = 'pendente'
+              AND (id_proponente = p_user_id OR id_aceitante = p_user_id);
+
+            IF ROW_COUNT() = 0 THEN
+                SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Só uma parte pode rejeitar contrato pendente';
+            END IF;
+        END
+    """)
+
+    cur.execute("""
+        CREATE PROCEDURE sp_add_audit_log(
+            IN p_user_id INT,
+            IN p_email VARCHAR(180),
+            IN p_action VARCHAR(80),
+            IN p_contract_id INT,
+            IN p_success BOOLEAN,
+            IN p_details TEXT,
+            IN p_ip VARCHAR(64),
+            IN p_user_agent VARCHAR(255)
+        )
+        BEGIN
+            INSERT INTO audit_log
+            (id_utilizador, email, acao, id_contrato, sucesso, detalhes, ip_address, user_agent)
+            VALUES
+            (p_user_id, p_email, p_action, p_contract_id, p_success, p_details, p_ip, LEFT(COALESCE(p_user_agent, ''), 255));
+        END
+    """)
+
+
+def _ensure_db_routines(cur) -> None:
+    _ensure_db_views(cur)
+    _ensure_db_triggers(cur)
+    _ensure_db_procedures(cur)
+
+
 def init_db() -> None:
-    root = _connect(None)
-    try:
-        with root.cursor() as cur:
-            cur.execute(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
-        root.commit()
-    finally:
-        root.close()
+    """Valida que a base de dados já foi criada pelos scripts SQL."""
+
+    required_tables = [
+        "utilizadores",
+        "chaves_utilizador",
+        "contratos",
+        "assinaturas_contrato",
+        "password_history",
+        "audit_log",
+    ]
+
+    required_views = [
+        "v_contratos_com_partes",
+        "v_contratos_publicos",
+        "v_user_security_stats",
+    ]
+
+    required_procedures = [
+        "sp_save_signature",
+        "sp_mark_sanado",
+        "sp_mark_rejeitado",
+        "sp_add_audit_log",
+    ]
 
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS utilizadores (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                nome VARCHAR(120) NOT NULL,
-                email VARCHAR(180) NOT NULL UNIQUE,
-                password_hash VARCHAR(255) NOT NULL,
-                data_registo DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-                mfa_secret VARCHAR(255) NULL,
-                password_changed_at DATETIME NULL,
-                must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
-                INDEX idx_utilizadores_email (email)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS chaves_utilizador (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                id_utilizador INT NOT NULL UNIQUE,
-                public_key LONGTEXT NOT NULL,
-                encrypted_private_key LONGTEXT NOT NULL,
-                private_key_salt VARCHAR(255) NOT NULL,
-                private_key_iv VARCHAR(255) NOT NULL,
-                private_key_algorithm VARCHAR(50) NOT NULL DEFAULT 'AES-256-CBC',
-                data_criacao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                CONSTRAINT fk_chaves_user FOREIGN KEY (id_utilizador)
-                    REFERENCES utilizadores(id) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS contratos (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                titulo VARCHAR(180) NOT NULL,
-                texto_contrato LONGTEXT NOT NULL,
-                id_proponente INT NOT NULL,
-                id_aceitante INT NOT NULL,
-                estado ENUM('pendente','assinado','sanado','rejeitado') NOT NULL DEFAULT 'pendente',
-                visibilidade ENUM('publico','privado') NOT NULL DEFAULT 'publico',
-                data_criacao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                data_atualizacao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                encrypted_text LONGTEXT NULL,
-                encryption_iv VARCHAR(255) NULL,
-                encryption_salt VARCHAR(255) NULL,
-                encryption_algorithm VARCHAR(50) NULL,
-                hmac_algorithm VARCHAR(50) NULL,
-                hmac_value LONGTEXT NULL,
-                reveal_at DATETIME NULL,
-                CONSTRAINT fk_contratos_prop FOREIGN KEY (id_proponente)
-                    REFERENCES utilizadores(id) ON DELETE CASCADE,
-                CONSTRAINT fk_contratos_aceit FOREIGN KEY (id_aceitante)
-                    REFERENCES utilizadores(id) ON DELETE CASCADE,
-                INDEX idx_contratos_estado (estado),
-                INDEX idx_contratos_prop (id_proponente),
-                INDEX idx_contratos_aceit (id_aceitante)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS assinaturas_contrato (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                id_contrato INT NOT NULL,
-                id_utilizador INT NOT NULL,
-                tipo_assinante ENUM('proponente','aceitante') NOT NULL,
-                assinatura_digital LONGTEXT NULL,
-                data_assinatura DATETIME NULL,
-                CONSTRAINT fk_assinaturas_contrato FOREIGN KEY (id_contrato)
-                    REFERENCES contratos(id) ON DELETE CASCADE,
-                CONSTRAINT fk_assinaturas_user FOREIGN KEY (id_utilizador)
-                    REFERENCES utilizadores(id) ON DELETE CASCADE,
-                UNIQUE KEY uq_assinatura_parte (id_contrato, id_utilizador, tipo_assinante)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS password_history (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                id_utilizador INT NOT NULL,
-                password_hash VARCHAR(255) NOT NULL,
-                data_criacao DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                CONSTRAINT fk_password_history_user FOREIGN KEY (id_utilizador)
-                    REFERENCES utilizadores(id) ON DELETE CASCADE
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """)
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                id_utilizador INT NULL,
-                email VARCHAR(180) NULL,
-                acao VARCHAR(80) NOT NULL,
-                id_contrato INT NULL,
-                sucesso BOOLEAN NOT NULL DEFAULT TRUE,
-                detalhes TEXT NULL,
-                ip_address VARCHAR(64) NULL,
-                user_agent VARCHAR(255) NULL,
-                data_evento DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_audit_user (id_utilizador),
-                INDEX idx_audit_email (email),
-                INDEX idx_audit_action (acao),
-                INDEX idx_audit_contract (id_contrato),
-                INDEX idx_audit_date (data_evento),
-                CONSTRAINT fk_audit_user FOREIGN KEY (id_utilizador)
-                    REFERENCES utilizadores(id) ON DELETE SET NULL,
-                CONSTRAINT fk_audit_contract FOREIGN KEY (id_contrato)
-                    REFERENCES contratos(id) ON DELETE SET NULL
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-        """)
 
-        # Lightweight migrations for older databases created before these fields existed.
-        _ensure_column(cur, "utilizadores", "mfa_enabled", "mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE")
-        _ensure_column(cur, "utilizadores", "mfa_secret", "mfa_secret VARCHAR(255) NULL")
-        _ensure_column(cur, "utilizadores", "password_changed_at", "password_changed_at DATETIME NULL")
-        _ensure_column(cur, "utilizadores", "must_change_password", "must_change_password BOOLEAN NOT NULL DEFAULT FALSE")
-        _ensure_column(cur, "contratos", "visibilidade", "visibilidade ENUM('publico','privado') NOT NULL DEFAULT 'publico'")
-        _ensure_column(cur, "contratos", "encrypted_text", "encrypted_text LONGTEXT NULL")
-        _ensure_column(cur, "contratos", "encryption_iv", "encryption_iv VARCHAR(255) NULL")
-        _ensure_column(cur, "contratos", "encryption_salt", "encryption_salt VARCHAR(255) NULL")
-        _ensure_column(cur, "contratos", "encryption_algorithm", "encryption_algorithm VARCHAR(50) NULL")
-        _ensure_column(cur, "contratos", "hmac_algorithm", "hmac_algorithm VARCHAR(50) NULL")
-        _ensure_column(cur, "contratos", "hmac_value", "hmac_value LONGTEXT NULL")
-        _ensure_column(cur, "contratos", "reveal_at", "reveal_at DATETIME NULL")
-        cur.execute("UPDATE utilizadores SET password_changed_at=COALESCE(password_changed_at, data_registo, NOW())")
+        for table in required_tables:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM information_schema.tables
+                WHERE table_schema=%s
+                  AND table_name=%s
+                  AND table_type='BASE TABLE'
+                """,
+                (DB_NAME, table),
+            )
+            if cur.fetchone()["total"] == 0:
+                raise RuntimeError(
+                    f"Tabela obrigatória em falta: {table}. "
+                    "Executa scripts/reset_and_seed.py antes de arrancar a app."
+                )
 
+        for view in required_views:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM information_schema.views
+                WHERE table_schema=%s
+                  AND table_name=%s
+                """,
+                (DB_NAME, view),
+            )
+            if cur.fetchone()["total"] == 0:
+                raise RuntimeError(
+                    f"View obrigatória em falta: {view}. "
+                    "Executa scripts/db_routines.sql ou scripts/reset_and_seed.py."
+                )
+
+        for procedure in required_procedures:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM information_schema.routines
+                WHERE routine_schema=%s
+                  AND routine_name=%s
+                  AND routine_type='PROCEDURE'
+                """,
+                (DB_NAME, procedure),
+            )
+            if cur.fetchone()["total"] == 0:
+                raise RuntimeError(
+                    f"Procedure obrigatória em falta: {procedure}. "
+                    "Executa scripts/db_routines.sql ou scripts/reset_and_seed.py."
+                )
 
 def create_user(nome: str, email: str, password_hash: str, key_data: dict[str, str]) -> int:
     with get_db() as conn:
@@ -343,13 +539,8 @@ def _contract_select(extra_where: str = "", params: tuple = ()) -> list[dict]:
     with get_db() as conn:
         cur = conn.cursor()
         sql = f"""
-            SELECT c.*,
-                   p.nome AS proponente_nome, p.email AS proponente_email,
-                   a.nome AS aceitante_nome, a.email AS aceitante_email,
-                   (SELECT COUNT(*) FROM assinaturas_contrato s WHERE s.id_contrato=c.id AND s.assinatura_digital IS NOT NULL) AS assinaturas_count
-            FROM contratos c
-            JOIN utilizadores p ON p.id = c.id_proponente
-            JOIN utilizadores a ON a.id = c.id_aceitante
+            SELECT c.*
+            FROM v_contratos_com_partes c
             {extra_where}
             ORDER BY c.data_criacao DESC, c.id DESC
         """
@@ -358,7 +549,10 @@ def _contract_select(extra_where: str = "", params: tuple = ()) -> list[dict]:
 
 
 def get_public_contracts() -> list[dict]:
-    return _contract_select("WHERE c.visibilidade='publico' AND c.estado IN ('assinado','sanado')")
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM v_contratos_publicos ORDER BY data_criacao DESC, id DESC")
+        return list(cur.fetchall())
 
 
 def get_visible_contracts(viewer_id: int | None = None) -> list[dict]:
@@ -426,30 +620,42 @@ def get_contract_signatures(contract_id: int) -> list[dict]:
 
 
 def save_signature(contract_id: int, user_id: int, signature: str) -> None:
+    """Saves a signature through a stored procedure.
+
+    The trigger trg_assinatura_after_update changes the contract state to
+    'assinado' when both signatures exist.
+    """
+    with get_db() as conn:
+        conn.cursor().callproc("sp_save_signature", (contract_id, user_id, signature))
+
+
+def mark_sanado(contract_id: int, user_id: int | None = None) -> None:
+    """Marks a contract as settled.
+
+    If user_id is supplied, the DB procedure enforces that the user is the
+    aceitante. Without user_id, this keeps backward compatibility with older
+    app.py versions that already check permissions before calling this function.
+    """
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE assinaturas_contrato
-            SET assinatura_digital=%s, data_assinatura=NOW()
-            WHERE id_contrato=%s AND id_utilizador=%s
-            """,
-            (signature, contract_id, user_id),
-        )
-        cur.execute("SELECT COUNT(*) AS total FROM assinaturas_contrato WHERE id_contrato=%s AND assinatura_digital IS NOT NULL", (contract_id,))
-        signed = cur.fetchone()["total"]
-        if signed >= 2:
-            cur.execute("UPDATE contratos SET estado='assinado' WHERE id=%s", (contract_id,))
+        if user_id is None:
+            cur.execute("UPDATE contratos SET estado='sanado' WHERE id=%s", (contract_id,))
+        else:
+            cur.callproc("sp_mark_sanado", (contract_id, user_id))
 
 
-def mark_sanado(contract_id: int) -> None:
+def mark_rejeitado(contract_id: int, user_id: int | None = None) -> None:
+    """Rejects a pending contract.
+
+    If user_id is supplied, the DB procedure enforces that the user is one of
+    the two parties. Without user_id, this keeps compatibility with old app.py.
+    """
     with get_db() as conn:
-        conn.cursor().execute("UPDATE contratos SET estado='sanado' WHERE id=%s", (contract_id,))
-
-
-def mark_rejeitado(contract_id: int) -> None:
-    with get_db() as conn:
-        conn.cursor().execute("UPDATE contratos SET estado='rejeitado' WHERE id=%s AND estado='pendente'", (contract_id,))
+        cur = conn.cursor()
+        if user_id is None:
+            cur.execute("UPDATE contratos SET estado='rejeitado' WHERE id=%s AND estado='pendente'", (contract_id,))
+        else:
+            cur.callproc("sp_mark_rejeitado", (contract_id, user_id))
 
 
 def add_audit_log(
@@ -463,13 +669,8 @@ def add_audit_log(
     user_agent: str | None = None,
 ) -> None:
     with get_db() as conn:
-        cur = conn.cursor()
-        cur.execute(
-            """
-            INSERT INTO audit_log
-            (id_utilizador, email, acao, id_contrato, sucesso, detalhes, ip_address, user_agent)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """,
+        conn.cursor().callproc(
+            "sp_add_audit_log",
             (user_id, email, action, contract_id, success, details, ip_address, (user_agent or "")[:255]),
         )
 
@@ -527,13 +728,22 @@ def get_contract_audit_logs(contract_id: int, limit: int = 30) -> list[dict]:
 def get_security_stats(user_id: int) -> dict:
     with get_db() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) AS total FROM audit_log WHERE id_utilizador=%s AND acao='LOGIN_OK'", (user_id,))
-        logins = int(cur.fetchone()["total"])
-        cur.execute("SELECT COUNT(*) AS total FROM audit_log WHERE id_utilizador=%s AND sucesso=FALSE", (user_id,))
-        failures = int(cur.fetchone()["total"])
-        cur.execute("SELECT COUNT(*) AS total FROM audit_log WHERE id_utilizador=%s AND acao='CONTRACT_EXPORTED_OPENSSL_ZIP'", (user_id,))
-        exports = int(cur.fetchone()["total"])
-        return {"logins": logins, "failures": failures, "openssl_exports": exports}
+        cur.execute(
+            """
+            SELECT logins, failures, openssl_exports
+            FROM v_user_security_stats
+            WHERE id_utilizador=%s
+            """,
+            (user_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return {"logins": 0, "failures": 0, "openssl_exports": 0}
+        return {
+            "logins": int(row["logins"] or 0),
+            "failures": int(row["failures"] or 0),
+            "openssl_exports": int(row["openssl_exports"] or 0),
+        }
 
 
 def update_contract_text_for_demo(contract_id: int, new_text: str) -> None:
