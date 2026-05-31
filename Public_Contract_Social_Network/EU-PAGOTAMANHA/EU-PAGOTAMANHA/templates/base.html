@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}EU-PAGOTAMANHÃ{% endblock %}</title>
+  <script>
+    (function () {
+      const savedTheme = localStorage.getItem("theme");
+      document.documentElement.dataset.theme = savedTheme === "dark" ? "dark" : "light";
+    })();
+  </script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260528-fresh">
+</head>
+<body>
+<header class="site-shell">
+  <nav class="navbar">
+    <div class="nav-links" data-nav-links>
+      <a class="nav-link {% if request.endpoint in ['index', 'home'] %}active{% endif %}" href="{{ url_for('index') }}">Home</a>
+      <a class="nav-link {% if request.endpoint in ['contracts_list', 'view_contract', 'create_contract', 'sign_contract_view'] %}active{% endif %}" href="{{ url_for('contracts_list') }}">Contracts</a>
+      <a class="nav-link {% if request.endpoint in ['users_list', 'profile'] %}active{% endif %}" href="{{ url_for('users_list') }}">Users</a>
+      <a class="nav-link {% if request.endpoint in ['verify_manual', 'verify_contract'] %}active{% endif %}" href="{{ url_for('verify_manual') }}">Verify</a>
+      {% if session.get('user_id') %}
+        <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
+      {% endif %}
+    </div>
+
+    <div class="nav-actions">
+      {% if session.get('user_id') %}
+        <a class="nav-link {% if request.endpoint in ['security_dashboard', 'change_password'] %}active{% endif %}" href="{{ url_for('security_dashboard') }}">Security</a>
+        <a class="nav-link {% if request.endpoint in ['mfa_setup', 'mfa_verify'] %}active{% endif %}" href="{{ url_for('mfa_setup') }}">MFA</a>
+        <a class="nav-link nav-link-logout" href="{{ url_for('logout') }}">Logout</a>
+      {% else %}
+        <a class="nav-link {% if request.endpoint == 'login' %}active{% endif %}" href="{{ url_for('login') }}">Login</a>
+        <a class="nav-link nav-link-cta {% if request.endpoint == 'register' %}active{% endif %}" href="{{ url_for('register') }}">Register</a>
+      {% endif %}
+      <button class="theme-switch" type="button" data-theme-toggle aria-label="Toggle theme">
+        <span class="theme-switch-track"><span class="theme-switch-thumb"></span></span>
+        <span class="theme-switch-label" data-theme-label>Dark</span>
+      </button>
+    </div>
+  </nav>
+</header>
+
+<main class="page-shell">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <section class="flash-stack">
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      </section>
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+
+<footer class="footer">
+  <span>EU-PAGOTAMANHÃ</span>
+  <span>Contratos assinados digitalmente · RSA · AES · HMAC</span>
+</footer>
+<script src="{{ url_for('static', filename='js/main.js') }}?v=20260528-fresh"></script>
+</body>
+</html>

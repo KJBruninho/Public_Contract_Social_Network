@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Sign contract · EU-PAGOTAMANHÃ{% endblock %}
+{% block content %}
+<section class="auth-layout narrow">
+  <div class="auth-copy card"><span class="eyebrow">Digital signature</span><h1>Sign contract #{{ contract.id }}</h1><p>Your password decrypts your RSA private key and signs the canonical contract payload.</p><div class="contract-text">{{ contract.texto_contrato }}</div></div>
+  <form class="form-card card" method="post">
+    {{ csrf_field() }}
+    <h2>Confirm signature</h2>
+    <label>Password<input type="password" name="password" required></label>
+    <button class="btn btn-primary full" type="submit">Sign digitally</button>
+  </form>
+</section>
+{% endblock %}
