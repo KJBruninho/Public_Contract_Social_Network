@@ -139,14 +139,14 @@ mysql --version
 ### 1. Clonar o repositório
 
 ```bash
-git clone https://github.com/teu-utilizador/EU-PAGOTAMANHA.git
-cd EU-PAGOTAMANHA
+git clone https://github.com/KJBruninho/Public_Contract_Social_Network.git
+cd Public_Contract_Social_Network/Public_Contract_Social_Network/EU-PAGOTAMANHA
 ```
 
 Se o projeto estiver dentro de outro repositório, entra diretamente na pasta da aplicação:
 
 ```bash
-cd Public_Contract_Social_Network/EU-PAGOTAMANHA
+cd Public_Contract_Social_Network/Public_Contract_Social_Network/EU-PAGOTAMANHA
 ```
 
 ---
