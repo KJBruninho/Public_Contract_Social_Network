@@ -487,11 +487,11 @@ Este ataque demonstra a importância das assinaturas digitais para integridade e
 O projeto inclui diagramas para documentação/apresentação:
 
 ```text
-T3-Ricardo-Rita-Raul-system-diagram.jpg
-T3-Ricardo-Rita-Raul-attack-diagram.png
+Diagrama_de_App.png
+Diagrama_de_BD.png
+Diagrama_de_Ataque.png
 ```
 
-Também podem ser usados diagramas auxiliares de fluxo da aplicação e de funcionamento da base de dados.
 
 ---
 
@@ -541,7 +541,7 @@ python scripts/reset_and_seed.py
 A base de dados não tem as stored procedures esperadas. Reexecuta:
 
 ```bash
-python scripts/reset_and_seed.py
+python scripts/init.py
 ```
 
 ---
